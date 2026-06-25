@@ -57,7 +57,7 @@ func init() {
 
 		c := config.(*Config)
 
-		validator := new(vless.MemoryValidator)
+		validator := vless.NewMemoryValidator()
 		for _, user := range c.Users {
 			u, err := user.ToMemoryUser()
 			if err != nil {
@@ -84,21 +84,24 @@ type Handler struct {
 	defaultDispatcher      routing.Dispatcher
 	ctx                    context.Context
 	fallbacks              map[string]map[string]map[string]*Fallback // or nil
+	defaultPolicy          policy.Session
 	// regexps               map[string]*regexp.Regexp       // or nil
 }
 
 // New creates a new VLess inbound handler.
 func New(ctx context.Context, config *Config, dc dns.Client, validator vless.Validator) (*Handler, error) {
 	v := core.MustFromContext(ctx)
+	pm := v.GetFeature(policy.ManagerType()).(policy.Manager)
 	handler := &Handler{
 		inboundHandlerManager:  v.GetFeature(feature_inbound.ManagerType()).(feature_inbound.Manager),
-		policyManager:          v.GetFeature(policy.ManagerType()).(policy.Manager),
+		policyManager:          pm,
 		stats:                  v.GetFeature(stats.ManagerType()).(stats.Manager),
 		validator:              validator,
 		outboundHandlerManager: v.GetFeature(outbound.ManagerType()).(outbound.Manager),
 		observer:               v.GetFeature(extension.ObservatoryType()),
 		defaultDispatcher:      v.GetFeature(routing.DispatcherType()).(routing.Dispatcher),
 		ctx:                    ctx,
+		defaultPolicy:          pm.ForLevel(0),
 	}
 
 	if config.Decryption != "" && config.Decryption != "none" {
@@ -278,15 +281,14 @@ func (h *Handler) Process(ctx context.Context, network net.Network, connection s
 		}
 	}
 
-	sessionPolicy := h.policyManager.ForLevel(0)
-	if err := connection.SetReadDeadline(time.Now().Add(sessionPolicy.Timeouts.Handshake)); err != nil {
+	if err := connection.SetReadDeadline(time.Now().Add(h.defaultPolicy.Timeouts.Handshake)); err != nil {
 		return errors.New("unable to set read deadline").Base(err).AtWarning()
 	}
 
-	first := buf.FromBytes(make([]byte, buf.Size))
-	first.Clear()
+	first := buf.New()
 	firstLen, errR := first.ReadFrom(connection)
 	if errR != nil {
+		first.Release()
 		return errR
 	}
 	errors.LogInfo(ctx, "firstLen = ", firstLen)
@@ -413,8 +415,8 @@ func (h *Handler) Process(ctx context.Context, network net.Network, connection s
 			}
 
 			ctx, cancel := context.WithCancel(ctx)
-			timer := signal.CancelAfterInactivity(ctx, cancel, sessionPolicy.Timeouts.ConnectionIdle)
-			ctx = policy.ContextWithBufferPolicy(ctx, sessionPolicy.Buffer)
+			timer := signal.CancelAfterInactivity(ctx, cancel, h.defaultPolicy.Timeouts.ConnectionIdle)
+			ctx = policy.ContextWithBufferPolicy(ctx, h.defaultPolicy.Buffer)
 
 			var conn net.Conn
 			if err := retry.ExponentialBackoff(5, 100).On(func() error {
@@ -433,7 +435,7 @@ func (h *Handler) Process(ctx context.Context, network net.Network, connection s
 			serverWriter := buf.NewWriter(conn)
 
 			postRequest := func() error {
-				defer timer.SetTimeout(sessionPolicy.Timeouts.DownlinkOnly)
+				defer timer.SetTimeout(h.defaultPolicy.Timeouts.DownlinkOnly)
 				if fb.Xver != 0 {
 					ipType := 4
 					remoteAddr, remotePort, err := net.SplitHostPort(connection.RemoteAddr().String())
@@ -497,7 +499,7 @@ func (h *Handler) Process(ctx context.Context, network net.Network, connection s
 			writer := buf.NewWriter(connection)
 
 			getResponse := func() error {
-				defer timer.SetTimeout(sessionPolicy.Timeouts.UplinkOnly)
+				defer timer.SetTimeout(h.defaultPolicy.Timeouts.UplinkOnly)
 				if err := buf.Copy(serverReader, writer, buf.UpdateActivity(timer)); err != nil {
 					return errors.New("failed to deliver response payload").Base(err).AtInfo()
 				}

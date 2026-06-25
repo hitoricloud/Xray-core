@@ -1,29 +1,48 @@
 package trojan
 
 import (
+	"encoding/hex"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/xtls/xray-core/common/errors"
 	"github.com/xtls/xray-core/common/protocol"
 )
 
 // Validator stores valid trojan users.
+// Native maps + RWMutex outperform sync.Map for the typical static user sets
+// on a production server.
 type Validator struct {
-	// Considering email's usage here, map + sync.Mutex/RWMutex may have better performance.
-	email sync.Map
-	users sync.Map
+	mu    sync.RWMutex
+	email map[string]*protocol.MemoryUser
+	users map[string]*protocol.MemoryUser
+	count atomic.Int64
+}
+
+// NewValidator creates a new Validator.
+func NewValidator() *Validator {
+	return &Validator{
+		email: make(map[string]*protocol.MemoryUser),
+		users: make(map[string]*protocol.MemoryUser),
+	}
 }
 
 // Add a trojan user, Email must be empty or unique.
 func (v *Validator) Add(u *protocol.MemoryUser) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
 	if u.Email != "" {
-		_, loaded := v.email.LoadOrStore(strings.ToLower(u.Email), u)
-		if loaded {
+		le := strings.ToLower(u.Email)
+		if _, loaded := v.email[le]; loaded {
 			return errors.New("User ", u.Email, " already exists.")
 		}
+		v.email[le] = u
 	}
-	v.users.Store(hexString(u.Account.(*MemoryAccount).Key), u)
+	key := hex.EncodeToString(u.Account.(*MemoryAccount).Key)
+	v.users[key] = u
+	v.count.Add(1)
 	return nil
 }
 
@@ -33,50 +52,47 @@ func (v *Validator) Del(e string) error {
 		return errors.New("Email must not be empty.")
 	}
 	le := strings.ToLower(e)
-	u, _ := v.email.Load(le)
-	if u == nil {
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	u, ok := v.email[le]
+	if !ok {
 		return errors.New("User ", e, " not found.")
 	}
-	v.email.Delete(le)
-	v.users.Delete(hexString(u.(*protocol.MemoryUser).Account.(*MemoryAccount).Key))
+	delete(v.email, le)
+	delete(v.users, hex.EncodeToString(u.Account.(*MemoryAccount).Key))
+	v.count.Add(-1)
 	return nil
 }
 
 // Get a trojan user with hashed key, nil if user doesn't exist.
 func (v *Validator) Get(hash string) *protocol.MemoryUser {
-	u, _ := v.users.Load(hash)
-	if u != nil {
-		return u.(*protocol.MemoryUser)
-	}
-	return nil
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.users[hash]
 }
 
 // Get a trojan user with hashed key, nil if user doesn't exist.
 func (v *Validator) GetByEmail(email string) *protocol.MemoryUser {
-	email = strings.ToLower(email)
-	u, _ := v.email.Load(email)
-	if u != nil {
-		return u.(*protocol.MemoryUser)
-	}
-	return nil
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.email[strings.ToLower(email)]
 }
 
 // Get all users
 func (v *Validator) GetAll() []*protocol.MemoryUser {
-	u := make([]*protocol.MemoryUser, 0, 100)
-	v.email.Range(func(key, value interface{}) bool {
-		u = append(u, value.(*protocol.MemoryUser))
-		return true
-	})
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	u := make([]*protocol.MemoryUser, 0, len(v.email))
+	for _, value := range v.email {
+		u = append(u, value)
+	}
 	return u
 }
 
 // Get users count
 func (v *Validator) GetCount() int64 {
-	var c int64 = 0
-	v.email.Range(func(key, value interface{}) bool {
-		c++
-		return true
-	})
-	return c
+	return v.count.Load()
 }

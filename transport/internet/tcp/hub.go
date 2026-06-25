@@ -3,13 +3,14 @@ package tcp
 import (
 	"context"
 	gotls "crypto/tls"
-	"strings"
+	stderrors "errors"
+	"net"
 	"time"
 
 	goreality "github.com/xtls/reality"
 	"github.com/xtls/xray-core/common"
-	"github.com/xtls/xray-core/common/errors"
-	"github.com/xtls/xray-core/common/net"
+	xerrors "github.com/xtls/xray-core/common/errors"
+	xnet "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/transport/internet"
 	"github.com/xtls/xray-core/transport/internet/reality"
 	"github.com/xtls/xray-core/transport/internet/stat"
@@ -18,7 +19,7 @@ import (
 
 // Listener is an internet.Listener that listens for TCP connections.
 type Listener struct {
-	listener      net.Listener
+	listener      xnet.Listener
 	tlsConfig     *gotls.Config
 	realityConfig *goreality.Config
 	authConfig    internet.ConnectionAuthenticator
@@ -27,7 +28,7 @@ type Listener struct {
 }
 
 // ListenTCP creates a new Listener based on configurations.
-func ListenTCP(ctx context.Context, address net.Address, port net.Port, streamSettings *internet.MemoryStreamConfig, handler internet.ConnHandler) (internet.Listener, error) {
+func ListenTCP(ctx context.Context, address xnet.Address, port xnet.Port, streamSettings *internet.MemoryStreamConfig, handler internet.ConnHandler) (internet.Listener, error) {
 	l := &Listener{
 		addConn: handler,
 	}
@@ -39,29 +40,29 @@ func ListenTCP(ctx context.Context, address net.Address, port net.Port, streamSe
 		}
 		streamSettings.SocketSettings.AcceptProxyProtocol = l.config.AcceptProxyProtocol || streamSettings.SocketSettings.AcceptProxyProtocol
 	}
-	var listener net.Listener
+	var listener xnet.Listener
 	var err error
-	if port == net.Port(0) { // unix
+	if port == xnet.Port(0) { // unix
 		if !address.Family().IsDomain() {
-			return nil, errors.New("invalid unix listen: ", address).AtError()
+			return nil, xerrors.New("invalid unix listen: ", address).AtError()
 		}
-		listener, err = internet.ListenSystem(ctx, &net.UnixAddr{
+		listener, err = internet.ListenSystem(ctx, &xnet.UnixAddr{
 			Name: address.Domain(),
 			Net:  "unix",
 		}, streamSettings.SocketSettings)
 		if err != nil {
-			return nil, errors.New("failed to listen Unix Domain Socket on ", address).Base(err)
+			return nil, xerrors.New("failed to listen Unix Domain Socket on ", address).Base(err)
 		}
-		errors.LogInfo(ctx, "listening Unix Domain Socket on ", address)
+		xerrors.LogInfo(ctx, "listening Unix Domain Socket on ", address)
 	} else {
-		listener, err = internet.ListenSystem(ctx, &net.TCPAddr{
+		listener, err = internet.ListenSystem(ctx, &xnet.TCPAddr{
 			IP:   address.IP(),
 			Port: int(port),
 		}, streamSettings.SocketSettings)
 		if err != nil {
-			return nil, errors.New("failed to listen TCP on ", address, ":", port).Base(err)
+			return nil, xerrors.New("failed to listen TCP on ", address, ":", port).Base(err)
 		}
-		errors.LogInfo(ctx, "listening TCP on ", address, ":", port)
+		xerrors.LogInfo(ctx, "listening TCP on ", address, ":", port)
 	}
 
 	if streamSettings.TcpmaskManager != nil {
@@ -69,7 +70,7 @@ func ListenTCP(ctx context.Context, address net.Address, port net.Port, streamSe
 	}
 
 	if streamSettings.SocketSettings != nil && streamSettings.SocketSettings.AcceptProxyProtocol {
-		errors.LogWarning(ctx, "accepting PROXY protocol")
+		xerrors.LogWarning(ctx, "accepting PROXY protocol")
 	}
 
 	l.listener = listener
@@ -85,11 +86,11 @@ func ListenTCP(ctx context.Context, address net.Address, port net.Port, streamSe
 	if tcpSettings.HeaderSettings != nil {
 		headerConfig, err := tcpSettings.HeaderSettings.GetInstance()
 		if err != nil {
-			return nil, errors.New("invalid header settings").Base(err).AtError()
+			return nil, xerrors.New("invalid header settings").Base(err).AtError()
 		}
 		auth, err := internet.CreateConnectionAuthenticator(headerConfig)
 		if err != nil {
-			return nil, errors.New("invalid header settings.").Base(err).AtError()
+			return nil, xerrors.New("invalid header settings.").Base(err).AtError()
 		}
 		l.authConfig = auth
 	}
@@ -102,14 +103,11 @@ func (v *Listener) keepAccepting() {
 	for {
 		conn, err := v.listener.Accept()
 		if err != nil {
-			errStr := err.Error()
-			if strings.Contains(errStr, "closed") {
+			if stderrors.Is(err, net.ErrClosed) {
 				break
 			}
-			errors.LogWarningInner(context.Background(), err, "failed to accepted raw connections")
-			if strings.Contains(errStr, "too many") {
-				time.Sleep(time.Millisecond * 500)
-			}
+			xerrors.LogWarningInner(context.Background(), err, "failed to accepted raw connections")
+			time.Sleep(time.Millisecond * 100)
 			continue
 		}
 
@@ -118,7 +116,7 @@ func (v *Listener) keepAccepting() {
 				conn = tls.Server(conn, v.tlsConfig)
 			} else if v.realityConfig != nil {
 				if conn, err = reality.Server(conn, v.realityConfig); err != nil {
-					errors.LogInfo(context.Background(), err.Error())
+					xerrors.LogInfo(context.Background(), err.Error())
 					return
 				}
 			}

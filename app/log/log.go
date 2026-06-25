@@ -95,6 +95,12 @@ func (g *Instance) startInternal() error {
 		return errors.New("failed to initialize error logger").Base(err).AtWarning()
 	}
 
+	// Tell the common log package the real severity threshold so that hot-path
+	// LogInfo/Debug calls can return early without building messages.
+	if g.errorLogger != nil {
+		log.SetMinSeverity(g.config.ErrorLogLevel)
+	}
+
 	return nil
 }
 
@@ -159,6 +165,9 @@ func (g *Instance) Close() error {
 
 	common.Close(g.errorLogger)
 	g.errorLogger = nil
+
+	// Reset to the default so any later logs are still emitted.
+	log.SetMinSeverity(log.Severity_Debug)
 
 	return nil
 }

@@ -244,26 +244,46 @@ func getGetCertificateFunc(c *tls.Config, ca []*Certificate) func(hello *tls.Cli
 }
 
 func getNewGetCertificateFunc(certs []*tls.Certificate, rejectUnknownSNI bool) func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-		if len(certs) == 0 {
+	if len(certs) == 0 {
+		return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			return nil, errNoCertificates
 		}
-		sni := strings.ToLower(hello.ServerName)
-		if !rejectUnknownSNI && (len(certs) == 1 || sni == "") {
+	}
+	if len(certs) == 1 && !rejectUnknownSNI {
+		return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			return certs[0], nil
 		}
-		gsni := "*"
-		if index := strings.IndexByte(sni, '.'); index != -1 {
-			gsni += sni[index:]
+	}
+
+	certBySNI := make(map[string]*tls.Certificate, len(certs)*2)
+	for _, keyPair := range certs {
+		if keyPair.Leaf == nil {
+			continue
 		}
-		for _, keyPair := range certs {
-			if keyPair.Leaf.Subject.CommonName == sni || keyPair.Leaf.Subject.CommonName == gsni {
-				return keyPair, nil
+		cn := strings.ToLower(keyPair.Leaf.Subject.CommonName)
+		if cn != "" {
+			certBySNI[cn] = keyPair
+		}
+		for _, name := range keyPair.Leaf.DNSNames {
+			name = strings.ToLower(name)
+			if name != "" {
+				certBySNI[name] = keyPair
 			}
-			for _, name := range keyPair.Leaf.DNSNames {
-				if name == sni || name == gsni {
-					return keyPair, nil
-				}
+		}
+	}
+	gsni := "*"
+
+	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		sni := strings.ToLower(hello.ServerName)
+		if !rejectUnknownSNI && sni == "" {
+			return certs[0], nil
+		}
+		if cert, ok := certBySNI[sni]; ok {
+			return cert, nil
+		}
+		if index := strings.IndexByte(sni, '.'); index != -1 {
+			if cert, ok := certBySNI[gsni+sni[index:]]; ok {
+				return cert, nil
 			}
 		}
 		if rejectUnknownSNI {

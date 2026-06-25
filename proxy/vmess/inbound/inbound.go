@@ -107,17 +107,20 @@ type Handler struct {
 	clients               *vmess.TimedUserValidator
 	usersByEmail          *userByEmail
 	sessionHistory        *encoding.SessionHistory
+	defaultPolicy         policy.Session
 }
 
 // New creates a new VMess inbound handler.
 func New(ctx context.Context, config *Config) (*Handler, error) {
 	v := core.MustFromContext(ctx)
+	pm := v.GetFeature(policy.ManagerType()).(policy.Manager)
 	handler := &Handler{
-		policyManager:         v.GetFeature(policy.ManagerType()).(policy.Manager),
+		policyManager:         pm,
 		inboundHandlerManager: v.GetFeature(feature_inbound.ManagerType()).(feature_inbound.Manager),
 		clients:               vmess.NewTimedUserValidator(),
 		usersByEmail:          newUserByEmail(config.GetDefaultValue()),
 		sessionHistory:        encoding.NewSessionHistory(),
+		defaultPolicy:         pm.ForLevel(0),
 	}
 
 	for _, user := range config.User {
@@ -225,8 +228,7 @@ func transferResponse(timer signal.ActivityUpdater, session *encoding.ServerSess
 
 // Process implements proxy.Inbound.Process().
 func (h *Handler) Process(ctx context.Context, network net.Network, connection stat.Connection, dispatcher routing.Dispatcher) error {
-	sessionPolicy := h.policyManager.ForLevel(0)
-	if err := connection.SetReadDeadline(time.Now().Add(sessionPolicy.Timeouts.Handshake)); err != nil {
+	if err := connection.SetReadDeadline(time.Now().Add(h.defaultPolicy.Timeouts.Handshake)); err != nil {
 		return errors.New("unable to set read deadline").Base(err).AtWarning()
 	}
 
@@ -273,7 +275,7 @@ func (h *Handler) Process(ctx context.Context, network net.Network, connection s
 	inbound.CanSpliceCopy = 3
 	inbound.User = request.User
 
-	sessionPolicy = h.policyManager.ForLevel(request.User.Level)
+	sessionPolicy := h.policyManager.ForLevel(request.User.Level)
 
 	ctx, cancel := context.WithCancel(ctx)
 	timer := signal.CancelAfterInactivity(ctx, cancel, sessionPolicy.Timeouts.ConnectionIdle)

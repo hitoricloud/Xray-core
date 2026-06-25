@@ -17,6 +17,7 @@ import (
 type TimedUserValidator struct {
 	sync.RWMutex
 	users []*protocol.MemoryUser
+	email map[string]*protocol.MemoryUser
 
 	behaviorSeed  uint64
 	behaviorFused bool
@@ -28,6 +29,7 @@ type TimedUserValidator struct {
 func NewTimedUserValidator() *TimedUserValidator {
 	tuv := &TimedUserValidator{
 		users:             make([]*protocol.MemoryUser, 0, 16),
+		email:             make(map[string]*protocol.MemoryUser),
 		aeadDecoderHolder: aead.NewAuthIDDecoderHolder(),
 	}
 	return tuv
@@ -38,6 +40,9 @@ func (v *TimedUserValidator) Add(u *protocol.MemoryUser) error {
 	defer v.Unlock()
 
 	v.users = append(v.users, u)
+	if u.Email != "" {
+		v.email[strings.ToLower(u.Email)] = u
+	}
 
 	account, ok := u.Account.(*MemoryAccount)
 	if !ok {
@@ -89,24 +94,25 @@ func (v *TimedUserValidator) Remove(email string) bool {
 	defer v.Unlock()
 
 	email = strings.ToLower(email)
-	idx := -1
-	for i, u := range v.users {
-		if strings.EqualFold(u.Email, email) {
-			idx = i
-			var cmdkeyfl [16]byte
-			copy(cmdkeyfl[:], u.Account.(*MemoryAccount).ID.CmdKey())
-			v.aeadDecoderHolder.RemoveUser(cmdkeyfl)
+	u, ok := v.email[email]
+	if !ok {
+		return false
+	}
+	delete(v.email, email)
+
+	var cmdkeyfl [16]byte
+	copy(cmdkeyfl[:], u.Account.(*MemoryAccount).ID.CmdKey())
+	v.aeadDecoderHolder.RemoveUser(cmdkeyfl)
+
+	for i, candidate := range v.users {
+		if candidate == u {
+			ulen := len(v.users)
+			v.users[i] = v.users[ulen-1]
+			v.users[ulen-1] = nil
+			v.users = v.users[:ulen-1]
 			break
 		}
 	}
-	if idx == -1 {
-		return false
-	}
-	ulen := len(v.users)
-
-	v.users[idx] = v.users[ulen-1]
-	v.users[ulen-1] = nil
-	v.users = v.users[:ulen-1]
 
 	return true
 }

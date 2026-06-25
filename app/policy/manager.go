@@ -11,12 +11,16 @@ import (
 type Instance struct {
 	levels map[uint32]*Policy
 	system *SystemPolicy
+	// cache stores the converted policy.Session for each level to avoid
+	// rebuilding the struct on every hot-path lookup.
+	cache map[uint32]policy.Session
 }
 
 // New creates new Policy manager instance.
 func New(ctx context.Context, config *Config) (*Instance, error) {
 	m := &Instance{
 		levels: make(map[uint32]*Policy),
+		cache:  make(map[uint32]policy.Session),
 		system: config.System,
 	}
 	if len(config.Level) > 0 {
@@ -24,6 +28,7 @@ func New(ctx context.Context, config *Config) (*Instance, error) {
 			pp := defaultPolicy()
 			pp.overrideWith(p)
 			m.levels[lv] = pp
+			m.cache[lv] = pp.ToCorePolicy()
 		}
 	}
 
@@ -37,8 +42,8 @@ func (*Instance) Type() interface{} {
 
 // ForLevel implements policy.Manager.
 func (m *Instance) ForLevel(level uint32) policy.Session {
-	if p, ok := m.levels[level]; ok {
-		return p.ToCorePolicy()
+	if p, ok := m.cache[level]; ok {
+		return p
 	}
 	return policy.SessionDefault()
 }

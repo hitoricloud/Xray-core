@@ -2,6 +2,7 @@ package trojan
 
 import (
 	"context"
+	"encoding/hex"
 	"io"
 	"strconv"
 	"strings"
@@ -39,11 +40,12 @@ type Server struct {
 	validator     *Validator
 	fallbacks     map[string]map[string]map[string]*Fallback // or nil
 	cone          bool
+	defaultPolicy policy.Session
 }
 
 // NewServer creates a new trojan inbound handler.
 func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
-	validator := new(Validator)
+	validator := NewValidator()
 	for _, user := range config.Users {
 		u, err := user.ToMemoryUser()
 		if err != nil {
@@ -56,10 +58,12 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	}
 
 	v := core.MustFromContext(ctx)
+	pm := v.GetFeature(policy.ManagerType()).(policy.Manager)
 	server := &Server{
-		policyManager: v.GetFeature(policy.ManagerType()).(policy.Manager),
+		policyManager: pm,
 		validator:     validator,
 		cone:          ctx.Value("cone").(bool),
+		defaultPolicy: pm.ForLevel(0),
 	}
 
 	if config.Fallbacks != nil {
@@ -149,15 +153,14 @@ func (s *Server) Network() []net.Network {
 func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Connection, dispatcher routing.Dispatcher) error {
 	iConn := stat.TryUnwrapStatsConn(conn)
 
-	sessionPolicy := s.policyManager.ForLevel(0)
-	if err := conn.SetReadDeadline(time.Now().Add(sessionPolicy.Timeouts.Handshake)); err != nil {
+	if err := conn.SetReadDeadline(time.Now().Add(s.defaultPolicy.Timeouts.Handshake)); err != nil {
 		return errors.New("unable to set read deadline").Base(err).AtWarning()
 	}
 
-	first := buf.FromBytes(make([]byte, buf.Size))
-	first.Clear()
+	first := buf.New()
 	firstLen, err := first.ReadFrom(conn)
 	if err != nil {
+		first.Release()
 		return errors.New("failed to read first request").Base(err)
 	}
 	errors.LogInfo(ctx, "firstLen = ", firstLen)
@@ -185,7 +188,7 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 
 		shouldFallback = true
 	} else {
-		user = s.validator.Get(hexString(first.BytesTo(56)))
+		user = s.validator.Get(hex.EncodeToString(first.BytesTo(56)))
 		if user == nil {
 			// invalid user, let's fallback
 			err = errors.New("not a valid user")
@@ -201,7 +204,7 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 	}
 
 	if isfb && shouldFallback {
-		return s.fallback(ctx, err, sessionPolicy, conn, iConn, napfb, first, firstLen, bufferedReader)
+		return s.fallback(ctx, err, s.defaultPolicy, conn, iConn, napfb, first, firstLen, bufferedReader)
 	} else if shouldFallback {
 		return errors.New("invalid protocol or invalid user")
 	}
@@ -226,7 +229,7 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 	inbound.Name = "trojan"
 	inbound.CanSpliceCopy = 3
 	inbound.User = user
-	sessionPolicy = s.policyManager.ForLevel(user.Level)
+	sessionPolicy := s.policyManager.ForLevel(user.Level)
 
 	if destination.Network == net.Network_UDP { // handle udp request
 		return s.handleUDPPayload(ctx, sessionPolicy, &PacketReader{Reader: clientReader}, &PacketWriter{Writer: conn}, dispatcher)

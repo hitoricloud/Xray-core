@@ -64,9 +64,10 @@ func dialWebSocket(ctx context.Context, dest net.Destination, streamSettings *in
 
 			return conn, err
 		},
-		ReadBufferSize:   4 * 1024,
-		WriteBufferSize:  4 * 1024,
-		HandshakeTimeout: time.Second * 8,
+		ReadBufferSize:    4 * 1024,
+		WriteBufferSize:   0,
+		WriteBufferPool:   wsBufferPool,
+		HandshakeTimeout:  time.Second * 8,
 	}
 
 	protocol := "ws"

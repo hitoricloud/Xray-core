@@ -30,15 +30,18 @@ type Server struct {
 	policyManager policy.Manager
 	cone          bool
 	httpServer    *http.Server
+	policy        policy.Session
 }
 
 // NewServer creates a new Server object.
 func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	v := core.MustFromContext(ctx)
+	pm := v.GetFeature(policy.ManagerType()).(policy.Manager)
 	s := &Server{
 		config:        config,
-		policyManager: v.GetFeature(policy.ManagerType()).(policy.Manager),
+		policyManager: pm,
 		cone:          ctx.Value("cone").(bool),
+		policy:        pm.ForLevel(config.UserLevel),
 	}
 	httpConfig := &http.ServerConfig{
 		UserLevel: config.UserLevel,
@@ -48,12 +51,6 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	}
 	s.httpServer, _ = http.NewServer(ctx, httpConfig)
 	return s, nil
-}
-
-func (s *Server) policy() policy.Session {
-	config := s.config
-	p := s.policyManager.ForLevel(config.UserLevel)
-	return p
 }
 
 // Network implements proxy.Inbound.
@@ -75,8 +72,8 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 
 	switch network {
 	case net.Network_TCP:
-		firstbyte := make([]byte, 1)
-		if n, err := conn.Read(firstbyte); n == 0 {
+		var firstbyte [1]byte
+		if n, err := conn.Read(firstbyte[:]); n == 0 {
 			if goerrors.Is(err, io.EOF) {
 				errors.LogInfo(ctx, "Connection closed immediately, likely health check connection")
 				return nil
@@ -85,16 +82,16 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 		}
 		if firstbyte[0] != 5 && firstbyte[0] != 4 { // Check if it is Socks5/4/4a
 			errors.LogDebug(ctx, "Not Socks request, try to parse as HTTP request")
-			return s.httpServer.ProcessWithFirstbyte(ctx, network, conn, dispatcher, firstbyte...)
+			return s.httpServer.ProcessWithFirstbyte(ctx, network, conn, dispatcher, firstbyte[:]...)
 		}
-		return s.processTCP(ctx, conn, dispatcher, firstbyte)
+		return s.processTCP(ctx, conn, dispatcher, firstbyte[:])
 	default:
 		return errors.New("unknown network: ", network)
 	}
 }
 
 func (s *Server) processTCP(ctx context.Context, conn stat.Connection, dispatcher routing.Dispatcher, firstbyte []byte) error {
-	plcy := s.policy()
+	plcy := s.policy
 	if err := conn.SetReadDeadline(time.Now().Add(plcy.Timeouts.Handshake)); err != nil {
 		errors.LogInfoInner(ctx, err, "failed to set deadline")
 	}

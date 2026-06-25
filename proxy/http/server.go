@@ -31,23 +31,20 @@ import (
 type Server struct {
 	config        *ServerConfig
 	policyManager policy.Manager
+	policy        policy.Session
 }
 
 // NewServer creates a new HTTP inbound handler.
 func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	v := core.MustFromContext(ctx)
+	pm := v.GetFeature(policy.ManagerType()).(policy.Manager)
 	s := &Server{
 		config:        config,
-		policyManager: v.GetFeature(policy.ManagerType()).(policy.Manager),
+		policyManager: pm,
+		policy:        pm.ForLevel(config.UserLevel),
 	}
 
 	return s, nil
-}
-
-func (s *Server) policy() policy.Session {
-	config := s.config
-	p := s.policyManager.ForLevel(config.UserLevel)
-	return p
 }
 
 // Network implements proxy.Inbound.
@@ -109,7 +106,7 @@ func (s *Server) ProcessWithFirstbyte(ctx context.Context, network net.Network, 
 	}
 
 Start:
-	if err := conn.SetReadDeadline(time.Now().Add(s.policy().Timeouts.Handshake)); err != nil {
+	if err := conn.SetReadDeadline(time.Now().Add(s.policy.Timeouts.Handshake)); err != nil {
 		errors.LogInfoInner(ctx, err, "failed to set read deadline")
 	}
 

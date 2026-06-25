@@ -93,11 +93,14 @@ func (r *cachedReader) Interrupt() {
 
 // DefaultDispatcher is a default implementation of Dispatcher.
 type DefaultDispatcher struct {
-	ohm    outbound.Manager
-	router routing.Router
-	policy policy.Manager
-	stats  stats.Manager
-	fdns   dns.FakeDNSEngine
+	ohm             outbound.Manager
+	router          routing.Router
+	policy          policy.Manager
+	stats           stats.Manager
+	fdns            dns.FakeDNSEngine
+	uplinkCounters  sync.Map // email -> stats.Counter
+	downlinkCounters sync.Map // email -> stats.Counter
+	onlineMaps      sync.Map // email -> stats.OnlineMap
 }
 
 func init() {
@@ -161,8 +164,8 @@ func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *tran
 	if user != nil && len(user.Email) > 0 {
 		p := d.policy.ForLevel(user.Level)
 		if p.Stats.UserUplink {
-			name := "user>>>" + user.Email + ">>>traffic>>>uplink"
-			if c, _ := stats.GetOrRegisterCounter(d.stats, name); c != nil {
+			c := d.getOrRegisterCounter(&d.uplinkCounters, user.Email, "uplink")
+			if c != nil {
 				inboundLink.Writer = &SizeStatWriter{
 					Counter: c,
 					Writer:  inboundLink.Writer,
@@ -170,8 +173,8 @@ func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *tran
 			}
 		}
 		if p.Stats.UserDownlink {
-			name := "user>>>" + user.Email + ">>>traffic>>>downlink"
-			if c, _ := stats.GetOrRegisterCounter(d.stats, name); c != nil {
+			c := d.getOrRegisterCounter(&d.downlinkCounters, user.Email, "downlink")
+			if c != nil {
 				outboundLink.Writer = &SizeStatWriter{
 					Counter: c,
 					Writer:  outboundLink.Writer,
@@ -180,11 +183,24 @@ func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *tran
 		}
 
 		if p.Stats.UserOnline {
-			trackOnlineIP(ctx, d.stats, user.Email, sessionInbound.Source.Address.String())
+			d.trackOnlineIP(ctx, user.Email, sessionInbound.Source.Address.String())
 		}
 	}
 
 	return inboundLink, outboundLink
+}
+
+func (d *DefaultDispatcher) getOrRegisterCounter(cache *sync.Map, email, direction string) stats.Counter {
+	if c, ok := cache.Load(email); ok {
+		return c.(stats.Counter)
+	}
+	name := "user>>>" + email + ">>>traffic>>>" + direction
+	c, _ := stats.GetOrRegisterCounter(d.stats, name)
+	if c == nil {
+		return nil
+	}
+	cache.Store(email, c)
+	return c
 }
 
 func WrapLink(ctx context.Context, policyManager policy.Manager, statsManager stats.Manager, link *transport.Link) *transport.Link {
@@ -227,6 +243,22 @@ func trackOnlineIP(ctx context.Context, sm stats.Manager, email, ip string) {
 		om.AddIP(ip)
 		context.AfterFunc(ctx, func() { om.RemoveIP(ip) })
 	}
+}
+
+func (d *DefaultDispatcher) trackOnlineIP(ctx context.Context, email, ip string) {
+	if om, ok := d.onlineMaps.Load(email); ok {
+		om.(stats.OnlineMap).AddIP(ip)
+		context.AfterFunc(ctx, func() { om.(stats.OnlineMap).RemoveIP(ip) })
+		return
+	}
+	name := "user>>>" + email + ">>>online"
+	om, _ := stats.GetOrRegisterOnlineMap(d.stats, name)
+	if om == nil {
+		return
+	}
+	d.onlineMaps.Store(email, om)
+	om.AddIP(ip)
+	context.AfterFunc(ctx, func() { om.RemoveIP(ip) })
 }
 
 func (d *DefaultDispatcher) shouldOverride(ctx context.Context, result SniffResult, request session.SniffingRequest, destination net.Destination) bool {

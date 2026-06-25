@@ -3,6 +3,7 @@ package vless
 import (
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/xtls/xray-core/common/errors"
 	"github.com/xtls/xray-core/common/protocol"
@@ -25,21 +26,37 @@ func ProcessUUID(id [16]byte) [16]byte {
 }
 
 // MemoryValidator stores valid VLESS users.
+// Using native maps + RWMutex is faster than sync.Map for the typical static
+// user sets on a production server.
 type MemoryValidator struct {
-	// Considering email's usage here, map + sync.Mutex/RWMutex may have better performance.
-	email sync.Map
-	users sync.Map
+	mu     sync.RWMutex
+	email  map[string]*protocol.MemoryUser
+	users  map[[16]byte]*protocol.MemoryUser
+	count  atomic.Int64
+}
+
+// NewMemoryValidator creates a new MemoryValidator.
+func NewMemoryValidator() *MemoryValidator {
+	return &MemoryValidator{
+		email: make(map[string]*protocol.MemoryUser),
+		users: make(map[[16]byte]*protocol.MemoryUser),
+	}
 }
 
 // Add a VLESS user, Email must be empty or unique.
 func (v *MemoryValidator) Add(u *protocol.MemoryUser) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
 	if u.Email != "" {
-		_, loaded := v.email.LoadOrStore(strings.ToLower(u.Email), u)
-		if loaded {
+		le := strings.ToLower(u.Email)
+		if _, loaded := v.email[le]; loaded {
 			return errors.New("User ", u.Email, " already exists.")
 		}
+		v.email[le] = u
 	}
-	v.users.Store(ProcessUUID(u.Account.(*MemoryAccount).ID.UUID()), u)
+	v.users[ProcessUUID(u.Account.(*MemoryAccount).ID.UUID())] = u
+	v.count.Add(1)
 	return nil
 }
 
@@ -49,50 +66,47 @@ func (v *MemoryValidator) Del(e string) error {
 		return errors.New("Email must not be empty.")
 	}
 	le := strings.ToLower(e)
-	u, _ := v.email.Load(le)
-	if u == nil {
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	u, ok := v.email[le]
+	if !ok {
 		return errors.New("User ", e, " not found.")
 	}
-	v.email.Delete(le)
-	v.users.Delete(ProcessUUID(u.(*protocol.MemoryUser).Account.(*MemoryAccount).ID.UUID()))
+	delete(v.email, le)
+	delete(v.users, ProcessUUID(u.Account.(*MemoryAccount).ID.UUID()))
+	v.count.Add(-1)
 	return nil
 }
 
 // Get a VLESS user with UUID, nil if user doesn't exist.
 func (v *MemoryValidator) Get(id uuid.UUID) *protocol.MemoryUser {
-	u, _ := v.users.Load(ProcessUUID(id))
-	if u != nil {
-		return u.(*protocol.MemoryUser)
-	}
-	return nil
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.users[ProcessUUID(id)]
 }
 
 // Get a VLESS user with email, nil if user doesn't exist.
 func (v *MemoryValidator) GetByEmail(email string) *protocol.MemoryUser {
-	email = strings.ToLower(email)
-	u, _ := v.email.Load(email)
-	if u != nil {
-		return u.(*protocol.MemoryUser)
-	}
-	return nil
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.email[strings.ToLower(email)]
 }
 
 // Get all users
 func (v *MemoryValidator) GetAll() []*protocol.MemoryUser {
-	u := make([]*protocol.MemoryUser, 0, 100)
-	v.email.Range(func(key, value interface{}) bool {
-		u = append(u, value.(*protocol.MemoryUser))
-		return true
-	})
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	u := make([]*protocol.MemoryUser, 0, len(v.email))
+	for _, value := range v.email {
+		u = append(u, value)
+	}
 	return u
 }
 
 // Get users count
 func (v *MemoryValidator) GetCount() int64 {
-	var c int64 = 0
-	v.email.Range(func(key, value interface{}) bool {
-		c++
-		return true
-	})
-	return c
+	return v.count.Load()
 }

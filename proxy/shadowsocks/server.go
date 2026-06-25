@@ -26,6 +26,7 @@ type Server struct {
 	validator     *Validator
 	policyManager policy.Manager
 	cone          bool
+	defaultPolicy policy.Session
 }
 
 // NewServer create a new Shadowsocks server.
@@ -43,11 +44,13 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	}
 
 	v := core.MustFromContext(ctx)
+	pm := v.GetFeature(policy.ManagerType()).(policy.Manager)
 	s := &Server{
 		config:        config,
 		validator:     validator,
-		policyManager: v.GetFeature(policy.ManagerType()).(policy.Manager),
+		policyManager: pm,
 		cone:          ctx.Value("cone").(bool),
+		defaultPolicy: pm.ForLevel(0),
 	}
 
 	return s, nil
@@ -198,8 +201,7 @@ func (s *Server) handleUDPPayload(ctx context.Context, conn stat.Connection, dis
 }
 
 func (s *Server) handleConnection(ctx context.Context, conn stat.Connection, dispatcher routing.Dispatcher) error {
-	sessionPolicy := s.policyManager.ForLevel(0)
-	if err := conn.SetReadDeadline(time.Now().Add(sessionPolicy.Timeouts.Handshake)); err != nil {
+	if err := conn.SetReadDeadline(time.Now().Add(s.defaultPolicy.Timeouts.Handshake)); err != nil {
 		return errors.New("unable to set read deadline").Base(err).AtWarning()
 	}
 
@@ -222,6 +224,8 @@ func (s *Server) handleConnection(ctx context.Context, conn stat.Connection, dis
 	}
 	inbound.User = request.User
 
+	sessionPolicy := s.policyManager.ForLevel(request.User.Level)
+
 	dest := request.Destination()
 	ctx = log.ContextWithAccessMessage(ctx, &log.AccessMessage{
 		From:   conn.RemoteAddr(),
@@ -232,7 +236,6 @@ func (s *Server) handleConnection(ctx context.Context, conn stat.Connection, dis
 	})
 	errors.LogInfo(ctx, "tunnelling request to ", dest)
 
-	sessionPolicy = s.policyManager.ForLevel(request.User.Level)
 	ctx, cancel := context.WithCancel(ctx)
 	timer := signal.CancelAfterInactivity(ctx, cancel, sessionPolicy.Timeouts.ConnectionIdle)
 

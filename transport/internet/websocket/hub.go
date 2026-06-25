@@ -29,10 +29,25 @@ type requestHandler struct {
 
 var replacer = strings.NewReplacer("+", "-", "/", "_", "=", "")
 
+// bufferPool is a gorilla/websocket BufferPool backed by sync.Pool.
+type bufferPool struct{ pool sync.Pool }
+
+func (p *bufferPool) Get() interface{} {
+	if v := p.pool.Get(); v != nil {
+		return v
+	}
+	return make([]byte, 4*1024)
+}
+
+func (p *bufferPool) Put(v interface{}) { p.pool.Put(v) }
+
+var wsBufferPool = &bufferPool{}
+
 var upgrader = &websocket.Upgrader{
-	ReadBufferSize:   0,
-	WriteBufferSize:  0,
-	HandshakeTimeout: time.Second * 4,
+	ReadBufferSize:    0,
+	WriteBufferSize:   0,
+	WriteBufferPool:   wsBufferPool,
+	HandshakeTimeout:  time.Second * 4,
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
