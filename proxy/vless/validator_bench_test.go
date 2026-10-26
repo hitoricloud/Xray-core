@@ -9,7 +9,7 @@ import (
 )
 
 func benchmarkValidatorGetN(b *testing.B, n int) {
-	v := &MemoryValidator{}
+	v := NewMemoryValidator()
 	ids := make([]uuid.UUID, n)
 	for i := 0; i < n; i++ {
 		id := uuid.New()
@@ -28,6 +28,13 @@ func benchmarkValidatorGetN(b *testing.B, n int) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = v.Get(ids[i%n])
+	}
+}
+
+// Keep benchmark setup covered by ordinary go test, not only -bench runs.
+func TestValidatorBenchmarkSetup(t *testing.T) {
+	if result := testing.Benchmark(BenchmarkValidatorGet1); result.N == 0 {
+		t.Fatal("validator benchmark setup failed")
 	}
 }
 

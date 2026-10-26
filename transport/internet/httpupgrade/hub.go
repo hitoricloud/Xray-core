@@ -4,8 +4,12 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	go_errors "errors"
+	"io"
+	stdnet "net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/errors"
@@ -43,7 +47,9 @@ func (s *server) Handle(conn net.Conn) {
 
 // upgrade execute a fake websocket upgrade process and return the available connection
 func (s *server) upgrade(conn net.Conn) (stat.Connection, error) {
-	connReader := bufio.NewReader(conn)
+	conn.SetReadDeadline(time.Now().Add(4 * time.Second))
+	defer conn.SetReadDeadline(time.Time{})
+	connReader := bufio.NewReader(io.LimitReader(conn, 12288))
 	req, err := http.ReadRequest(connReader)
 	if err != nil {
 		return nil, err
@@ -106,7 +112,12 @@ func (s *server) keepAccepting() {
 	for {
 		conn, err := s.innnerListener.Accept()
 		if err != nil {
-			return
+			if go_errors.Is(err, stdnet.ErrClosed) {
+				return
+			}
+			errors.LogWarningInner(context.Background(), err, "failed to accept HTTPUpgrade connection")
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
 		go s.Handle(conn)
 	}

@@ -28,7 +28,7 @@ import (
 )
 
 type client struct {
-	sync.Mutex
+	lock chan struct{}
 
 	dest           net.Destination
 	config         *Config
@@ -204,8 +204,9 @@ func (c *client) dial(ctx context.Context) error {
 			CommonHeaderPadding: []string{AuthRequestPadding.String()},
 		},
 	}
-	resp, err := rt.RoundTrip(req)
+	resp, err := rt.RoundTrip(req.WithContext(ctx))
 	if err != nil {
+		_ = rt.Close()
 		if conn != nil {
 			_ = conn.CloseWithError(closeErrCodeProtocolError, "")
 		}
@@ -213,13 +214,14 @@ func (c *client) dial(ctx context.Context) error {
 		_ = pktConn.Close()
 		return err
 	}
+	_ = resp.Body.Close()
 	if resp.StatusCode != StatusAuthOK {
+		_ = rt.Close()
 		_ = conn.CloseWithError(closeErrCodeProtocolError, "")
 		_ = tr.Close()
 		_ = pktConn.Close()
 		return errors.New("auth failed code ", resp.StatusCode)
 	}
-	_ = resp.Body.Close()
 
 	// udp, _ := strconv.ParseBool(resp.Header.Get(ResponseHeaderUDPEnabled))
 	down, _ := strconv.ParseUint(resp.Header.Get(CommonHeaderCCRX), 10, 64)
@@ -253,9 +255,15 @@ func (c *client) dial(ctx context.Context) error {
 	return nil
 }
 
+func (c *client) unlock() { <-c.lock }
+
 func (c *client) tcp(ctx context.Context) (stat.Connection, error) {
-	c.Lock()
-	defer c.Unlock()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case c.lock <- struct{}{}:
+		defer c.unlock()
+	}
 
 	err := c.dial(ctx)
 	if err != nil {
@@ -273,12 +281,17 @@ func (c *client) tcp(ctx context.Context) (stat.Connection, error) {
 		remote: c.conn.RemoteAddr(),
 
 		client: true,
+		lock:   make(chan struct{}, 1),
 	}, nil
 }
 
 func (c *client) udp(ctx context.Context) (stat.Connection, error) {
-	c.Lock()
-	defer c.Unlock()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case c.lock <- struct{}{}:
+		defer c.unlock()
+	}
 
 	err := c.dial(ctx)
 	if err != nil {
@@ -289,11 +302,11 @@ func (c *client) udp(ctx context.Context) (stat.Connection, error) {
 }
 
 func (c *client) clean() {
-	c.Lock()
+	c.lock <- struct{}{}
+	defer c.unlock()
 	if c.status() == StatusInactive {
 		c.close()
 	}
-	c.Unlock()
 }
 
 type dialerConf struct {
@@ -310,10 +323,14 @@ func (m *clientManager) clean() {
 	ticker := time.NewTicker(idleCleanupInterval)
 	for range ticker.C {
 		m.RLock()
+		clients := make([]*client, 0, len(m.m))
 		for _, c := range m.m {
-			c.clean()
+			clients = append(clients, c)
 		}
 		m.RUnlock()
+		for _, c := range clients {
+			c.clean()
+		}
 	}
 }
 
@@ -347,9 +364,10 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.Me
 		c = manager.m[dialerConf{dest, streamSettings}]
 		if c == nil {
 			c = &client{
+				lock:           make(chan struct{}, 1),
 				dest:           dest,
 				config:         streamSettings.ProtocolSettings.(*Config),
-				tlsConfig:      tlsConfig.GetTLSConfig(),
+				tlsConfig:      tlsConfig.GetTLSConfig(tls.WithDestination(dest)),
 				socketConfig:   streamSettings.SocketSettings,
 				udpmaskManager: streamSettings.UdpmaskManager,
 				quicParams:     streamSettings.QuicParams,

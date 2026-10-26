@@ -78,6 +78,15 @@ func (o *Observer) background() {
 			sleepTime = time.Duration(o.config.ProbeInterval)
 		}
 
+		if len(outbounds) == 0 {
+			select {
+			case <-time.After(sleepTime):
+			case <-o.finished.Wait():
+				return
+			}
+			continue
+		}
+
 		if !o.config.EnableConcurrency {
 			sort.Strings(outbounds)
 			for _, v := range outbounds {

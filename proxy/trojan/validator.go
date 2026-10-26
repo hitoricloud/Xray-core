@@ -73,6 +73,21 @@ func (v *Validator) Get(hash string) *protocol.MemoryUser {
 	return v.users[hash]
 }
 
+// GetByKey looks up the 56-byte wire key without allocating an encoded string.
+// Keep Get's existing encoded-key API for callers outside the inbound.
+func (v *Validator) GetByKey(key []byte) *protocol.MemoryUser {
+	const wireKeyLength = 56
+	if len(key) != wireKeyLength {
+		return nil
+	}
+	var hash [wireKeyLength * 2]byte
+	hex.Encode(hash[:], key)
+	v.mu.RLock()
+	user := v.users[string(hash[:])]
+	v.mu.RUnlock()
+	return user
+}
+
 // Get a trojan user with hashed key, nil if user doesn't exist.
 func (v *Validator) GetByEmail(email string) *protocol.MemoryUser {
 	v.mu.RLock()

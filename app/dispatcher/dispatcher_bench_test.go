@@ -17,27 +17,24 @@ func BenchmarkGetOrRegisterUplinkCounter(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	d := &DefaultDispatcher{stats: manager}
-
-	// Pre-register one counter so the benchmark measures the cached path.
-	_ = d.getOrRegisterCounter(&d.uplinkCounters, "user@example.com", "uplink")
-
+	const name = "user>>>TEST>>>traffic>>>uplink"
+	if _, err := manager.GetOrRegisterCounter(name); err != nil {
+		b.Fatal(err)
+	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = d.getOrRegisterCounter(&d.uplinkCounters, "user@example.com", "uplink")
+		_, _ = manager.GetOrRegisterCounter(name)
 	}
 }
 
-func BenchmarkGetOrRegisterUplinkCounterUncached(b *testing.B) {
+func BenchmarkGetOrRegisterTenCounters(b *testing.B) {
 	log.RegisterHandler(discardHandler{})
 	manager, err := appstats.NewManager(nil, &appstats.Config{})
 	if err != nil {
 		b.Fatal(err)
 	}
-	d := &DefaultDispatcher{stats: manager}
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = d.getOrRegisterCounter(&d.uplinkCounters, "user" + string(rune('0'+i%10)) + "@example.com", "uplink")
+		_, _ = manager.GetOrRegisterCounter("user>>>TEST" + string(rune('0'+i%10)) + ">>>traffic>>>uplink")
 	}
 }

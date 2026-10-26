@@ -139,42 +139,54 @@ func New(msg ...interface{}) *Error {
 }
 
 func LogDebug(ctx context.Context, msg ...interface{}) {
-	doLog(ctx, nil, log.Severity_Debug, msg...)
+	if log.IsSeverityEnabled(log.Severity_Debug) {
+		doLog(ctx, nil, log.Severity_Debug, msg...)
+	}
 }
 
 func LogDebugInner(ctx context.Context, inner error, msg ...interface{}) {
-	doLog(ctx, inner, log.Severity_Debug, msg...)
+	if log.IsSeverityEnabled(log.Severity_Debug) {
+		doLog(ctx, inner, log.Severity_Debug, msg...)
+	}
 }
 
 func LogInfo(ctx context.Context, msg ...interface{}) {
-	doLog(ctx, nil, log.Severity_Info, msg...)
+	if log.IsSeverityEnabled(log.Severity_Info) {
+		doLog(ctx, nil, log.Severity_Info, msg...)
+	}
 }
 
 func LogInfoInner(ctx context.Context, inner error, msg ...interface{}) {
-	doLog(ctx, inner, log.Severity_Info, msg...)
+	if log.IsSeverityEnabled(log.Severity_Info) {
+		doLog(ctx, inner, log.Severity_Info, msg...)
+	}
 }
 
 func LogWarning(ctx context.Context, msg ...interface{}) {
-	doLog(ctx, nil, log.Severity_Warning, msg...)
+	if log.IsSeverityEnabled(log.Severity_Warning) {
+		doLog(ctx, nil, log.Severity_Warning, msg...)
+	}
 }
 
 func LogWarningInner(ctx context.Context, inner error, msg ...interface{}) {
-	doLog(ctx, inner, log.Severity_Warning, msg...)
+	if log.IsSeverityEnabled(log.Severity_Warning) {
+		doLog(ctx, inner, log.Severity_Warning, msg...)
+	}
 }
 
 func LogError(ctx context.Context, msg ...interface{}) {
-	doLog(ctx, nil, log.Severity_Error, msg...)
+	if log.IsSeverityEnabled(log.Severity_Error) {
+		doLog(ctx, nil, log.Severity_Error, msg...)
+	}
 }
 
 func LogErrorInner(ctx context.Context, inner error, msg ...interface{}) {
-	doLog(ctx, inner, log.Severity_Error, msg...)
+	if log.IsSeverityEnabled(log.Severity_Error) {
+		doLog(ctx, inner, log.Severity_Error, msg...)
+	}
 }
 
 func doLog(ctx context.Context, inner error, severity log.Severity, msg ...interface{}) {
-	if !log.IsSeverityEnabled(severity) {
-		return
-	}
-
 	pc, _, _, _ := runtime.Caller(2)
 	details := runtime.FuncForPC(pc).Name()
 	if len(details) >= trim {

@@ -2,7 +2,6 @@ package trojan
 
 import (
 	"context"
-	"encoding/hex"
 	"io"
 	"strconv"
 	"strings"
@@ -163,7 +162,9 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 		first.Release()
 		return errors.New("failed to read first request").Base(err)
 	}
-	errors.LogInfo(ctx, "firstLen = ", firstLen)
+	if log.IsSeverityEnabled(log.Severity_Info) {
+		errors.LogInfo(ctx, "firstLen = ", firstLen)
+	}
 
 	bufferedReader := &buf.BufferedReader{
 		Reader: buf.NewReader(conn),
@@ -188,7 +189,7 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 
 		shouldFallback = true
 	} else {
-		user = s.validator.Get(hex.EncodeToString(first.BytesTo(56)))
+		user = s.validator.GetByKey(first.BytesTo(56))
 		if user == nil {
 			// invalid user, let's fallback
 			err = errors.New("not a valid user")
@@ -243,7 +244,9 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 		Email:  user.Email,
 	})
 
-	errors.LogInfo(ctx, "received request for ", destination)
+	if log.IsSeverityEnabled(log.Severity_Info) {
+		errors.LogInfo(ctx, "received request for ", destination)
+	}
 	return s.handleConnection(ctx, sessionPolicy, destination, clientReader, buf.NewWriter(conn), dispatcher)
 }
 

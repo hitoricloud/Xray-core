@@ -2,6 +2,7 @@ package log // import "github.com/xtls/xray-core/common/log"
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/xtls/xray-core/common/serial"
 )
@@ -35,17 +36,17 @@ func Record(msg Message) {
 var logHandler syncHandler
 
 // minSeverity is the lowest severity that will be processed. Log calls below it return early.
-var minSeverity Severity = Severity_Debug
+var minSeverity = int32(Severity_Debug)
 
 // SetMinSeverity sets the minimum severity that will be processed. Messages with a higher
 // severity value (less severe) are silently dropped at the source.
 func SetMinSeverity(severity Severity) {
-	minSeverity = severity
+	atomic.StoreInt32(&minSeverity, int32(severity))
 }
 
 // IsSeverityEnabled reports whether messages of the given severity will be processed.
 func IsSeverityEnabled(severity Severity) bool {
-	return severity <= minSeverity
+	return severity <= Severity(atomic.LoadInt32(&minSeverity))
 }
 
 // RegisterHandler registers a new handler as current log handler. Previous registered handler will be discarded.

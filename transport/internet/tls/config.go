@@ -19,9 +19,13 @@ import (
 	"github.com/xtls/xray-core/common/platform/filesystem"
 	"github.com/xtls/xray-core/common/protocol/tls/cert"
 	"github.com/xtls/xray-core/transport/internet"
+	"google.golang.org/protobuf/proto"
 )
 
 var globalSessionCache = tls.NewLRUClientSessionCache(128)
+
+// Protect certificate-slot publication; published certificates stay immutable.
+var certificateAccess sync.RWMutex
 
 // ParseCertificate converts a cert.Certificate to Certificate.
 func ParseCertificate(c *cert.Certificate) *Certificate {
@@ -48,10 +52,12 @@ func (c *Config) loadSelfCertPool() (*x509.CertPool, error) {
 // BuildCertificates builds a list of TLS certificates from proto definition.
 func (c *Config) BuildCertificates() []*tls.Certificate {
 	certs := make([]*tls.Certificate, 0, len(c.Certificate))
-	for _, entry := range c.Certificate {
-		if entry.Usage != Certificate_ENCIPHERMENT {
+	for _, rawEntry := range c.Certificate {
+		if rawEntry.Usage != Certificate_ENCIPHERMENT {
 			continue
 		}
+		// Each TLS config owns its reload state instead of mutating shared protobufs.
+		entry := proto.Clone(rawEntry).(*Certificate)
 		getX509KeyPair := func() *tls.Certificate {
 			keyPair, err := tls.X509KeyPair(entry.Certificate, entry.Key)
 			if err != nil {
@@ -65,14 +71,22 @@ func (c *Config) BuildCertificates() []*tls.Certificate {
 			}
 			return &keyPair
 		}
-		if keyPair := getX509KeyPair(); keyPair != nil {
-			certs = append(certs, keyPair)
-		} else {
+		keyPair := getX509KeyPair()
+		if keyPair == nil {
 			continue
 		}
+		certificateAccess.Lock()
+		certs = append(certs, keyPair)
 		index := len(certs) - 1
+		certificateAccess.Unlock()
 		setupOcspTicker(entry, func(isReloaded, isOcspstapling bool) {
-			cert := certs[index]
+			if !isReloaded && !isOcspstapling {
+				return
+			}
+			certificateAccess.RLock()
+			previous := *certs[index]
+			certificateAccess.RUnlock()
+			cert := &previous
 			if isReloaded {
 				if newKeyPair := getX509KeyPair(); newKeyPair != nil {
 					cert = newKeyPair
@@ -87,7 +101,9 @@ func (c *Config) BuildCertificates() []*tls.Certificate {
 					cert.OCSPStaple = newOCSPData
 				}
 			}
+			certificateAccess.Lock()
 			certs[index] = cert
+			certificateAccess.Unlock()
 		})
 	}
 	return certs
@@ -244,46 +260,36 @@ func getGetCertificateFunc(c *tls.Config, ca []*Certificate) func(hello *tls.Cli
 }
 
 func getNewGetCertificateFunc(certs []*tls.Certificate, rejectUnknownSNI bool) func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	if len(certs) == 0 {
-		return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		certificateAccess.RLock()
+		defer certificateAccess.RUnlock()
+		if len(certs) == 0 {
 			return nil, errNoCertificates
 		}
-	}
-	if len(certs) == 1 && !rejectUnknownSNI {
-		return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			return certs[0], nil
-		}
-	}
-
-	certBySNI := make(map[string]*tls.Certificate, len(certs)*2)
-	for _, keyPair := range certs {
-		if keyPair.Leaf == nil {
-			continue
-		}
-		cn := strings.ToLower(keyPair.Leaf.Subject.CommonName)
-		if cn != "" {
-			certBySNI[cn] = keyPair
-		}
-		for _, name := range keyPair.Leaf.DNSNames {
-			name = strings.ToLower(name)
-			if name != "" {
-				certBySNI[name] = keyPair
-			}
-		}
-	}
-	gsni := "*"
-
-	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 		sni := strings.ToLower(hello.ServerName)
-		if !rejectUnknownSNI && sni == "" {
+		if sni == "" && rejectUnknownSNI {
+			return nil, errNoCertificates
+		}
+		if !rejectUnknownSNI && (len(certs) == 1 || sni == "") {
 			return certs[0], nil
 		}
-		if cert, ok := certBySNI[sni]; ok {
-			return cert, nil
-		}
+		wildcard := "*"
 		if index := strings.IndexByte(sni, '.'); index != -1 {
-			if cert, ok := certBySNI[gsni+sni[index:]]; ok {
-				return cert, nil
+			wildcard += sni[index:]
+		}
+		for _, candidate := range certs {
+			if candidate.Leaf == nil {
+				continue
+			}
+			cn := strings.ToLower(candidate.Leaf.Subject.CommonName)
+			if cn == sni || cn == wildcard {
+				return candidate, nil
+			}
+			for _, name := range candidate.Leaf.DNSNames {
+				name = strings.ToLower(name)
+				if name == sni || name == wildcard {
+					return candidate, nil
+				}
 			}
 		}
 		if rejectUnknownSNI {
@@ -351,6 +357,9 @@ func (r *RandCarrier) verifyPeerCert(rawCerts [][]byte, verifiedChains [][]*x509
 	}
 
 	if verifyResult == foundCA { // if found CA, we need to verify here
+		if r.Config.ServerName == "" {
+			return errors.New("Pinning CA needs a valid ServerName")
+		}
 		opts := x509.VerifyOptions{
 			Roots:         CAs,
 			CurrentTime:   time.Now(),
@@ -478,7 +487,7 @@ func (c *Config) GetTLSConfig(opts ...Option) *tls.Config {
 	}
 
 	if len(c.MasterKeyLog) > 0 && c.MasterKeyLog != "none" {
-		writer, err := os.OpenFile(c.MasterKeyLog, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
+		writer, err := os.OpenFile(c.MasterKeyLog, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 		if err != nil {
 			errors.LogErrorInner(context.Background(), err, "failed to open ", c.MasterKeyLog, " as master key log")
 		} else {

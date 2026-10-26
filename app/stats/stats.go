@@ -48,6 +48,18 @@ func (m *Manager) RegisterCounter(name string) (stats.Counter, error) {
 	return c, nil
 }
 
+// GetOrRegisterCounter implements stats.Manager.
+func (m *Manager) GetOrRegisterCounter(name string) (stats.Counter, error) {
+	m.access.Lock()
+	defer m.access.Unlock()
+	if c, found := m.counters[name]; found {
+		return c, nil
+	}
+	c := new(Counter)
+	m.counters[name] = c
+	return c, nil
+}
+
 // UnregisterCounter implements stats.Manager.
 func (m *Manager) UnregisterCounter(name string) error {
 	m.access.Lock()
@@ -92,6 +104,18 @@ func (m *Manager) RegisterOnlineMap(name string) (stats.OnlineMap, error) {
 		return nil, errors.New("OnlineMap ", name, " already registered.")
 	}
 	errors.LogDebug(context.Background(), "create new OnlineMap ", name)
+	om := NewOnlineMap()
+	m.onlineMaps[name] = om
+	return om, nil
+}
+
+// GetOrRegisterOnlineMap implements stats.Manager.
+func (m *Manager) GetOrRegisterOnlineMap(name string) (stats.OnlineMap, error) {
+	m.access.Lock()
+	defer m.access.Unlock()
+	if om, found := m.onlineMaps[name]; found {
+		return om, nil
+	}
 	om := NewOnlineMap()
 	m.onlineMaps[name] = om
 	return om, nil
@@ -146,6 +170,23 @@ func (m *Manager) RegisterChannel(name string) (stats.Channel, error) {
 	if m.running {
 		return c, c.Start()
 	}
+	return c, nil
+}
+
+// GetOrRegisterChannel implements stats.Manager.
+func (m *Manager) GetOrRegisterChannel(name string) (stats.Channel, error) {
+	m.access.Lock()
+	defer m.access.Unlock()
+	if c, found := m.channels[name]; found {
+		return c, nil
+	}
+	c := NewChannel(&ChannelConfig{BufferSize: 64, Blocking: false})
+	if m.running {
+		if err := c.Start(); err != nil {
+			return nil, err
+		}
+	}
+	m.channels[name] = c
 	return c, nil
 }
 

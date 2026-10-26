@@ -29,10 +29,10 @@ func ProcessUUID(id [16]byte) [16]byte {
 // Using native maps + RWMutex is faster than sync.Map for the typical static
 // user sets on a production server.
 type MemoryValidator struct {
-	mu     sync.RWMutex
-	email  map[string]*protocol.MemoryUser
-	users  map[[16]byte]*protocol.MemoryUser
-	count  atomic.Int64
+	mu    sync.RWMutex
+	email map[string]*protocol.MemoryUser
+	users map[[16]byte]*protocol.MemoryUser
+	count atomic.Int64
 }
 
 // NewMemoryValidator creates a new MemoryValidator.
@@ -82,9 +82,11 @@ func (v *MemoryValidator) Del(e string) error {
 
 // Get a VLESS user with UUID, nil if user doesn't exist.
 func (v *MemoryValidator) Get(id uuid.UUID) *protocol.MemoryUser {
+	key := ProcessUUID(id)
 	v.mu.RLock()
-	defer v.mu.RUnlock()
-	return v.users[ProcessUUID(id)]
+	user := v.users[key]
+	v.mu.RUnlock()
+	return user
 }
 
 // Get a VLESS user with email, nil if user doesn't exist.
