@@ -9,6 +9,7 @@ import (
 	xnet "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/transport/internet"
 	gogrpc "google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
@@ -43,9 +44,15 @@ func TestRedialAfterInitialContextCanceled(t *testing.T) {
 	}
 	cancel()
 	server.Stop()
-	start(address)
 	later, stop := context.WithTimeout(context.Background(), 4*time.Second)
 	defer stop()
+	// An RPC sent before the client notices the closed transport fails with EOF regardless of the dial context.
+	for state := conn.GetState(); state == connectivity.Ready; state = conn.GetState() {
+		if !conn.WaitForStateChange(later, state) {
+			t.Fatal("client never noticed the stopped server")
+		}
+	}
+	start(address)
 	if _, err := check.Check(later, &healthpb.HealthCheckRequest{}, gogrpc.WaitForReady(true)); err != nil {
 		t.Fatalf("redial retained canceled request context: %v", err)
 	}
