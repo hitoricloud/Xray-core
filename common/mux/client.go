@@ -38,7 +38,7 @@ func (m *ClientManager) Dispatch(ctx context.Context, link *transport.Link) erro
 		}
 	}
 
-	return errors.New("unable to find an available mux client").AtWarning()
+	return errors.New("unable to find an available mux client")
 }
 
 type WorkerPicker interface {
@@ -188,6 +188,7 @@ var (
 
 // NewClientWorker creates a new mux.Client.
 func NewClientWorker(stream transport.Link, s ClientStrategy) (*ClientWorker, error) {
+	stream.Writer = &MutexWriter{Writer: stream.Writer}
 	c := &ClientWorker{
 		sessionManager: NewSessionManager(),
 		link:           stream,

@@ -118,7 +118,8 @@ func (w *BufferedWriter) Write(b []byte) (int, error) {
 
 		nBytes, err := w.buffer.Write(b)
 		totalBytes += nBytes
-		// A full buffer can contain a valid partial write: flush and continue.
+
+		// ErrBufferFull means a partial write, so flush below and continue
 		if err != nil && err != ErrBufferFull {
 			return totalBytes, err
 		}

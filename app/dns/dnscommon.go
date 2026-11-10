@@ -188,10 +188,10 @@ func parseResponse(payload []byte) (*IPRecord, error) {
 	var parser dnsmessage.Parser
 	h, err := parser.Start(payload)
 	if err != nil {
-		return nil, errors.New("failed to parse DNS response").Base(err).AtWarning()
+		return nil, errors.New("failed to parse DNS response").Base(err)
 	}
 	if err := parser.SkipAllQuestions(); err != nil {
-		return nil, errors.New("failed to skip questions in DNS response").Base(err).AtWarning()
+		return nil, errors.New("failed to skip questions in DNS response").Base(err)
 	}
 
 	now := time.Now()
@@ -201,6 +201,7 @@ func parseResponse(payload []byte) (*IPRecord, error) {
 		RawHeader: &h,
 	}
 	defer func() {
+		// set to default TTL if no valid TTL is found
 		if ipRecord.Expire.IsZero() {
 			ipRecord.Expire = now.Add(time.Second * dns_feature.DefaultTTL)
 		}

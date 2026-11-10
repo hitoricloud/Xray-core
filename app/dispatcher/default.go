@@ -161,8 +161,8 @@ func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *tran
 	if user != nil && len(user.Email) > 0 {
 		p := d.policy.ForLevel(user.Level)
 		if p.Stats.UserUplink {
-			c, _ := d.stats.GetOrRegisterCounter("user>>>" + user.Email + ">>>traffic>>>uplink")
-			if c != nil {
+			name := "user>>>" + user.Email + ">>>traffic>>>uplink"
+			if c, _ := d.stats.GetOrRegisterCounter(name); c != nil {
 				inboundLink.Writer = &SizeStatWriter{
 					Counter: c,
 					Writer:  inboundLink.Writer,
@@ -170,8 +170,8 @@ func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *tran
 			}
 		}
 		if p.Stats.UserDownlink {
-			c, _ := d.stats.GetOrRegisterCounter("user>>>" + user.Email + ">>>traffic>>>downlink")
-			if c != nil {
+			name := "user>>>" + user.Email + ">>>traffic>>>downlink"
+			if c, _ := d.stats.GetOrRegisterCounter(name); c != nil {
 				outboundLink.Writer = &SizeStatWriter{
 					Counter: c,
 					Writer:  outboundLink.Writer,
@@ -200,13 +200,13 @@ func WrapLink(ctx context.Context, policyManager policy.Manager, statsManager st
 		p := policyManager.ForLevel(user.Level)
 		if p.Stats.UserUplink {
 			name := "user>>>" + user.Email + ">>>traffic>>>uplink"
-			if c, _ := stats.GetOrRegisterCounter(statsManager, name); c != nil {
+			if c, _ := statsManager.GetOrRegisterCounter(name); c != nil {
 				link.Reader.(*buf.TimeoutWrapperReader).Counter = c
 			}
 		}
 		if p.Stats.UserDownlink {
 			name := "user>>>" + user.Email + ">>>traffic>>>downlink"
-			if c, _ := stats.GetOrRegisterCounter(statsManager, name); c != nil {
+			if c, _ := statsManager.GetOrRegisterCounter(name); c != nil {
 				link.Writer = &SizeStatWriter{
 					Counter: c,
 					Writer:  link.Writer,
@@ -223,7 +223,7 @@ func WrapLink(ctx context.Context, policyManager policy.Manager, statsManager st
 
 func trackOnlineIP(ctx context.Context, sm stats.Manager, email, ip string) {
 	name := "user>>>" + email + ">>>online"
-	if om, _ := stats.GetOrRegisterOnlineMap(sm, name); om != nil {
+	if om, _ := sm.GetOrRegisterOnlineMap(name); om != nil {
 		om.AddIP(ip)
 		context.AfterFunc(ctx, func() { om.RemoveIP(ip) })
 	}
@@ -474,9 +474,10 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 				return // DO NOT CHANGE: the traffic shouldn't be processed by default outbound if the specified outbound tag doesn't exist (yet), e.g., VLESS Reverse Proxy
 			}
 		} else {
-			if log.IsSeverityEnabled(log.Severity_Info) {
-				errors.LogInfo(ctx, "default route for ", destination)
+			if err != common.ErrNoClue {
+				errors.LogErrorInner(ctx, err, "failed to pick route for ", destination)
 			}
+			errors.LogInfo(ctx, "default route for ", destination)
 		}
 	}
 

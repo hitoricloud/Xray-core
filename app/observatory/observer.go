@@ -79,11 +79,8 @@ func (o *Observer) background() {
 		}
 
 		if len(outbounds) == 0 {
-			select {
-			case <-time.After(sleepTime):
-			case <-o.finished.Wait():
-				return
-			}
+			errors.LogWarning(o.ctx, "no outbound matches subjectSelector ", o.config.SubjectSelector)
+			time.Sleep(sleepTime)
 			continue
 		}
 

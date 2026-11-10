@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	appstats "github.com/xtls/xray-core/app/stats"
-	stats "github.com/xtls/xray-core/features/stats"
 )
 
 func TestAtomicGetOrRegister(t *testing.T) {
@@ -19,9 +18,9 @@ func TestAtomicGetOrRegister(t *testing.T) {
 	}
 	t.Cleanup(func() { m.Close() })
 	cases := map[string]func() (any, error){
-		"counter": func() (any, error) { return stats.GetOrRegisterCounter(m, "TEST") },
-		"online":  func() (any, error) { return stats.GetOrRegisterOnlineMap(m, "TEST") },
-		"channel": func() (any, error) { return stats.GetOrRegisterChannel(m, "TEST") },
+		"counter": func() (any, error) { return m.GetOrRegisterCounter("TEST") },
+		"online":  func() (any, error) { return m.GetOrRegisterOnlineMap("TEST") },
+		"channel": func() (any, error) { return m.GetOrRegisterChannel("TEST") },
 	}
 	for name, get := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -18,6 +18,7 @@ type PacketReader struct {
 }
 
 // NewPacketReader creates a new PacketReader.
+// dest is copied because the caller reuses it for the next frame.
 func NewPacketReader(reader io.Reader, dest *net.Destination) *PacketReader {
 	var target net.Destination
 	if dest != nil {
@@ -52,7 +53,7 @@ func (r *PacketReader) ReadMultiBuffer() (buf.MultiBuffer, error) {
 	}
 	r.eof = true
 	if r.dest.Network == net.Network_UDP {
-		b.UDP = &r.dest
+		b.UDP = &r.dest // only one packet is read, so b owns r.dest
 	}
 	return buf.MultiBuffer{b}, nil
 }

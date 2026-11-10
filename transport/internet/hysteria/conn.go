@@ -39,6 +39,7 @@ func (c *interConn) Read(b []byte) (int, error) {
 func (c *interConn) Write(b []byte) (int, error) {
 	c.lock <- struct{}{}
 	defer c.unlock()
+
 	if c.client {
 		c.client = false
 		if _, err := c.stream.Write(append(quicvarint.Append(nil, FrameTypeTCPRequest), b...)); err != nil {
@@ -46,7 +47,6 @@ func (c *interConn) Write(b []byte) (int, error) {
 		}
 		return len(b), nil
 	}
-
 	return c.stream.Write(b)
 }
 
@@ -119,14 +119,11 @@ func (c *InterConn) Update() {
 
 func (c *InterConn) Read(p []byte) (int, error) {
 	b, ok := <-c.ch
-	if !ok {
-		return 0, io.EOF
+	if ok {
+		c.Update()
+		return copy(p, b), nil
 	}
-	if len(p) < len(b) {
-		return 0, io.ErrShortBuffer
-	}
-	c.Update()
-	return copy(p, b), nil
+	return 0, io.EOF
 }
 
 func (c *InterConn) Write(p []byte) (int, error) {

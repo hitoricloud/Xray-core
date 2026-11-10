@@ -81,7 +81,7 @@ type Manager interface {
 
 	// RegisterCounter registers a new counter to the manager. The identifier string must not be empty, and unique among other counters.
 	RegisterCounter(string) (Counter, error)
-	// GetOrRegisterCounter atomically returns or registers a counter.
+	// GetOrRegisterCounter returns the counter by its identifier, atomically creating and registering it if absent.
 	GetOrRegisterCounter(string) (Counter, error)
 	// UnregisterCounter unregisters a counter from the manager by its identifier.
 	UnregisterCounter(string) error
@@ -93,7 +93,7 @@ type Manager interface {
 
 	// RegisterOnlineMap registers a new OnlineMap to the manager. The identifier string must not be empty, and unique among other OnlineMaps.
 	RegisterOnlineMap(string) (OnlineMap, error)
-	// GetOrRegisterOnlineMap atomically returns or registers an online map.
+	// GetOrRegisterOnlineMap returns the OnlineMap by its identifier, atomically creating and registering it if absent.
 	GetOrRegisterOnlineMap(string) (OnlineMap, error)
 	// UnregisterOnlineMap unregisters an OnlineMap from the manager by its identifier.
 	UnregisterOnlineMap(string) error
@@ -105,7 +105,7 @@ type Manager interface {
 
 	// RegisterChannel registers a new channel to the manager. The identifier string must not be empty, and unique among other channels.
 	RegisterChannel(string) (Channel, error)
-	// GetOrRegisterChannel atomically returns or registers a channel.
+	// GetOrRegisterChannel returns the channel by its identifier, atomically creating and registering it if absent.
 	GetOrRegisterChannel(string) (Channel, error)
 	// UnregisterChannel unregisters a channel from the manager by its identifier.
 	UnregisterChannel(string) error
@@ -114,21 +114,6 @@ type Manager interface {
 
 	// GetAllOnlineUsers returns all online users from all OnlineMaps.
 	GetAllOnlineUsers() []string
-}
-
-// GetOrRegisterCounter tries to get the StatCounter first. If not exist, it then tries to create a new counter.
-func GetOrRegisterCounter(m Manager, name string) (Counter, error) {
-	return m.GetOrRegisterCounter(name)
-}
-
-// GetOrRegisterOnlineMap tries to get the OnlineMap first. If not exist, it then tries to create a new OnlineMap.
-func GetOrRegisterOnlineMap(m Manager, name string) (OnlineMap, error) {
-	return m.GetOrRegisterOnlineMap(name)
-}
-
-// GetOrRegisterChannel tries to get the StatChannel first. If not exist, it then tries to create a new channel.
-func GetOrRegisterChannel(m Manager, name string) (Channel, error) {
-	return m.GetOrRegisterChannel(name)
 }
 
 // ManagerType returns the type of Manager interface. Can be used to implement common.HasType.

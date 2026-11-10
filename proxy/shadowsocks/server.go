@@ -35,11 +35,11 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	for _, user := range config.Users {
 		u, err := user.ToMemoryUser()
 		if err != nil {
-			return nil, errors.New("failed to get shadowsocks user").Base(err).AtError()
+			return nil, errors.New("failed to get shadowsocks user").Base(err)
 		}
 
 		if err := validator.Add(u); err != nil {
-			return nil, errors.New("failed to add user").Base(err).AtError()
+			return nil, errors.New("failed to add user").Base(err)
 		}
 	}
 
@@ -201,8 +201,9 @@ func (s *Server) handleUDPPayload(ctx context.Context, conn stat.Connection, dis
 }
 
 func (s *Server) handleConnection(ctx context.Context, conn stat.Connection, dispatcher routing.Dispatcher) error {
-	if err := conn.SetReadDeadline(time.Now().Add(s.defaultPolicy.Timeouts.Handshake)); err != nil {
-		return errors.New("unable to set read deadline").Base(err).AtWarning()
+	sessionPolicy := s.policyManager.ForLevel(0)
+	if err := conn.SetReadDeadline(time.Now().Add(sessionPolicy.Timeouts.Handshake)); err != nil {
+		return errors.New("unable to set read deadline").Base(err)
 	}
 
 	bufferedReader := buf.BufferedReader{Reader: buf.NewReader(conn)}
@@ -224,7 +225,7 @@ func (s *Server) handleConnection(ctx context.Context, conn stat.Connection, dis
 	}
 	inbound.User = request.User
 
-	sessionPolicy := s.policyManager.ForLevel(request.User.Level)
+	sessionPolicy = s.policyManager.ForLevel(request.User.Level)
 
 	dest := request.Destination()
 	ctx = log.ContextWithAccessMessage(ctx, &log.AccessMessage{

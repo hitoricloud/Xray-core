@@ -89,7 +89,8 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 
 	var mbuf buf.MultiBuffer
 	if reader, ok := link.Reader.(buf.TimeoutReader); ok {
-		mbuf, _ = reader.ReadMultiBufferTimeout(500 * time.Millisecond)
+		// Don't wait forever: server-first protocols (SMTP, FTP, MySQL...) send nothing until the server greets.
+		mbuf, _ = reader.ReadMultiBufferTimeout(time.Millisecond * 500)
 	} else {
 		mbuf, _ = link.Reader.ReadMultiBuffer()
 	}
@@ -179,15 +180,18 @@ func fillRequestHeader(ctx context.Context, header []*Header) ([]*Header, error)
 	outbounds := session.OutboundsFromContext(ctx)
 	ob := outbounds[len(outbounds)-1]
 
-	if inbound == nil || ob == nil {
-		return nil, errors.New("missing inbound or outbound metadata from context")
+	var src net.Destination
+	if inbound != nil {
+		src = inbound.Source
+	} else {
+		src = net.TCPDestination(net.AnyIP, 0)
 	}
 
 	data := struct {
 		Source net.Destination
 		Target net.Destination
 	}{
-		Source: inbound.Source,
+		Source: src,
 		Target: ob.Target,
 	}
 
@@ -249,6 +253,7 @@ func setUpHTTPTunnel(ctx context.Context, dest net.Destination, target string, u
 			rawConn.Close()
 			return nil, errors.New("Proxy responded with non 200 code: " + resp.Status)
 		}
+		// Tunneled bytes (e.g. a server-first greeting) may arrive in the same read as the 200 response.
 		if n := reader.Buffered(); n > 0 {
 			early, _ := reader.Peek(n)
 			return &earlyDataConn{Conn: rawConn, early: early}, nil
@@ -383,7 +388,7 @@ func (h *http2Conn) Close() error {
 	return h.out.Close()
 }
 
-// earlyDataConn preserves bytes read ahead with an HTTP CONNECT response.
+// earlyDataConn returns the bytes read ahead together with the CONNECT response before reading from Conn.
 type earlyDataConn struct {
 	net.Conn
 	early []byte

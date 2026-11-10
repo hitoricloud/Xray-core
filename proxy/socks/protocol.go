@@ -209,11 +209,12 @@ func (s *ServerSession) handshake5(nMethod byte, reader io.Reader, writer net.Co
 		}
 		responsePort = net.Port(udpHub.LocalAddr().(*net.UDPAddr).Port)
 		expectedRemote := &gonet.UDPAddr{}
-		if request.Address.IP().IsUnspecified() {
+		// UDP Associate should not specify a domain as source IP
+		if request.Address.Family().IsDomain() || request.Address.IP().IsUnspecified() {
 			expectedRemote.IP = writer.RemoteAddr().(*net.TCPAddr).IP // unix?
 		} else {
-			expectedRemote.IP = request.Address.IP() // panic?
-			expectedRemote.Port = int(request.Port)  // 0 is allowed
+			expectedRemote.IP = request.Address.IP()
+			expectedRemote.Port = int(request.Port) // 0 is allowed
 		}
 		tempUDPConn = NewTempUDPConn(udpHub, writer, expectedRemote)
 	}
@@ -457,10 +458,10 @@ func ClientHandshake(request *protocol.RequestHeader, reader io.Reader, writer i
 	}
 
 	if b.Byte(0) != socks5Version {
-		return nil, errors.New("unexpected server version: ", b.Byte(0)).AtWarning()
+		return nil, errors.New("unexpected server version: ", b.Byte(0))
 	}
 	if b.Byte(1) != authByte {
-		return nil, errors.New("auth method not supported.").AtWarning()
+		return nil, errors.New("auth method not supported.")
 	}
 
 	if authByte == authPassword {

@@ -52,9 +52,11 @@ func (m *Manager) RegisterCounter(name string) (stats.Counter, error) {
 func (m *Manager) GetOrRegisterCounter(name string) (stats.Counter, error) {
 	m.access.Lock()
 	defer m.access.Unlock()
+
 	if c, found := m.counters[name]; found {
 		return c, nil
 	}
+	errors.LogDebug(context.Background(), "create new counter ", name)
 	c := new(Counter)
 	m.counters[name] = c
 	return c, nil
@@ -113,9 +115,11 @@ func (m *Manager) RegisterOnlineMap(name string) (stats.OnlineMap, error) {
 func (m *Manager) GetOrRegisterOnlineMap(name string) (stats.OnlineMap, error) {
 	m.access.Lock()
 	defer m.access.Unlock()
+
 	if om, found := m.onlineMaps[name]; found {
 		return om, nil
 	}
+	errors.LogDebug(context.Background(), "create new OnlineMap ", name)
 	om := NewOnlineMap()
 	m.onlineMaps[name] = om
 	return om, nil
@@ -177,11 +181,14 @@ func (m *Manager) RegisterChannel(name string) (stats.Channel, error) {
 func (m *Manager) GetOrRegisterChannel(name string) (stats.Channel, error) {
 	m.access.Lock()
 	defer m.access.Unlock()
+
 	if c, found := m.channels[name]; found {
 		return c, nil
 	}
+	errors.LogDebug(context.Background(), "create new channel ", name)
 	c := NewChannel(&ChannelConfig{BufferSize: 64, Blocking: false})
 	if m.running {
+		// Start before publishing so no goroutine can observe an unstarted channel.
 		if err := c.Start(); err != nil {
 			return nil, err
 		}

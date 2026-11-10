@@ -134,7 +134,7 @@ func TestMarshalConfigJson(t *testing.T) {
 func getConfig() string {
 	return `{
   "log": {
-    "loglevel": "debug"
+    "logLevel": "debug"
   },
   "stats": {},
   "policy": {
@@ -207,6 +207,7 @@ func getConfig() string {
       "tag": "XHTTP_IN",
       "streamSettings": {
         "network": "xhttp",
+		"security": "tls",
         "xhttpSettings": {
           "host": "bing.com",
           "path": "/xhttp_client_upload",

@@ -42,32 +42,21 @@ func ListenTCP(ctx context.Context, address xnet.Address, port xnet.Port, stream
 	}
 	var listener xnet.Listener
 	var err error
+	var addr xnet.Addr
 	if port == xnet.Port(0) { // unix
-		if !address.Family().IsDomain() {
-			return nil, xerrors.New("invalid unix listen: ", address).AtError()
-		}
-		listener, err = internet.ListenSystem(ctx, &xnet.UnixAddr{
-			Name: address.Domain(),
-			Net:  "unix",
-		}, streamSettings.SocketSettings)
-		if err != nil {
-			return nil, xerrors.New("failed to listen Unix Domain Socket on ", address).Base(err)
-		}
-		xerrors.LogInfo(ctx, "listening Unix Domain Socket on ", address)
+		addr = &xnet.UnixAddr{Name: address.Domain(), Net: "unix"}
+	} else { // tcp
+		addr = &xnet.TCPAddr{IP: address.IP(), Port: int(port)}
+	}
+	if streamSettings.FinalMask != nil {
+		listener, err = streamSettings.FinalMask.Listen(ctx, addr)
 	} else {
-		listener, err = internet.ListenSystem(ctx, &xnet.TCPAddr{
-			IP:   address.IP(),
-			Port: int(port),
-		}, streamSettings.SocketSettings)
-		if err != nil {
-			return nil, xerrors.New("failed to listen TCP on ", address, ":", port).Base(err)
-		}
-		xerrors.LogInfo(ctx, "listening TCP on ", address, ":", port)
+		listener, err = internet.ListenSystem(ctx, addr, streamSettings.SocketSettings)
 	}
-
-	if streamSettings.TcpmaskManager != nil {
-		listener, _ = streamSettings.TcpmaskManager.WrapListener(listener)
+	if err != nil {
+		return nil, xerrors.New("failed to listen ", addr.Network(), " on ", address, ":", port).Base(err)
 	}
+	xerrors.LogInfo(ctx, "listening ", addr.Network(), " on ", address, ":", port)
 
 	if streamSettings.SocketSettings != nil && streamSettings.SocketSettings.AcceptProxyProtocol {
 		xerrors.LogWarning(ctx, "accepting PROXY protocol")
@@ -86,11 +75,11 @@ func ListenTCP(ctx context.Context, address xnet.Address, port xnet.Port, stream
 	if tcpSettings.HeaderSettings != nil {
 		headerConfig, err := tcpSettings.HeaderSettings.GetInstance()
 		if err != nil {
-			return nil, xerrors.New("invalid header settings").Base(err).AtError()
+			return nil, xerrors.New("invalid header settings").Base(err)
 		}
 		auth, err := internet.CreateConnectionAuthenticator(headerConfig)
 		if err != nil {
-			return nil, xerrors.New("invalid header settings.").Base(err).AtError()
+			return nil, xerrors.New("invalid header settings.").Base(err)
 		}
 		l.authConfig = auth
 	}

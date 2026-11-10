@@ -1,7 +1,6 @@
 package log // import "github.com/xtls/xray-core/common/log"
 
 import (
-	"sync"
 	"sync/atomic"
 
 	"github.com/xtls/xray-core/common/serial"
@@ -30,10 +29,27 @@ func (m *GeneralMessage) String() string {
 
 // Record writes a message into log stream.
 func Record(msg Message) {
-	logHandler.Handle(msg)
+	if h := logHandler.Load(); h != nil {
+		(*h).Handle(msg)
+	}
 }
 
-var logHandler syncHandler
+type SeverityLogger interface {
+	Handler
+	Severity() Severity
+}
+
+func GetSeverity() Severity {
+	if h := logHandler.Load(); h != nil {
+		if sh, ok := (*h).(SeverityLogger); ok {
+			return sh.Severity()
+		}
+	}
+	// log everything by default
+	return Severity_Debug
+}
+
+var logHandler atomic.Pointer[Handler]
 
 // minSeverity is the lowest severity that will be processed. Log calls below it return early.
 var minSeverity = int32(Severity_Debug)
@@ -54,26 +70,5 @@ func RegisterHandler(handler Handler) {
 	if handler == nil {
 		panic("Log handler is nil")
 	}
-	logHandler.Set(handler)
-}
-
-type syncHandler struct {
-	sync.RWMutex
-	Handler
-}
-
-func (h *syncHandler) Handle(msg Message) {
-	h.RLock()
-	defer h.RUnlock()
-
-	if h.Handler != nil {
-		h.Handler.Handle(msg)
-	}
-}
-
-func (h *syncHandler) Set(handler Handler) {
-	h.Lock()
-	defer h.Unlock()
-
-	h.Handler = handler
+	logHandler.Store(&handler)
 }
