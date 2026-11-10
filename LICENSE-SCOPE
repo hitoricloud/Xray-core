@@ -1,0 +1,32 @@
+# hitoricloud Files: licensed under LICENSE-HITORI (hitoricloud Delayed Open Source License 1.1).
+# Every other file is Xray-core code under the Mozilla Public License 2.0 (LICENSE), including files hitoricloud modified.
+app/dispatcher/dispatcher_bench_test.go
+app/dispatcher/stats_regression_test.go
+app/dns/ttl_regression_test.go
+app/observatory/empty_selector_test.go
+app/policy/policy_bench_test.go
+app/stats/registration_test.go
+common/buf/buffer_bench_test.go
+common/buf/writer_regression_test.go
+common/errors/errors_bench_test.go
+common/errors/log_filter_test.go
+common/log/severity_test.go
+common/mux/reader_regression_test.go
+common/serial/serial_bench_test.go
+common/uuid/uuid_bench_test.go
+proxy/http/upstream_regression_test.go
+proxy/trojan/handshake_bench_test.go
+proxy/trojan/validator_bench_test.go
+proxy/trojan/validator_wire_test.go
+proxy/vless/validator_bench_test.go
+proxy/vless/validator_lookup_test.go
+testing/load/load_test.go
+testing/load/trojan_bench_test.go
+testing/scenarios/http_server_first_test.go
+transport/internet/grpc/redial_test.go
+transport/internet/httpupgrade/accept_regression_test.go
+transport/internet/hysteria/lifecycle_test.go
+transport/internet/tls/certificate_selection_test.go
+transport/internet/tls/config_bench_test.go
+transport/internet/tls/pin_identity_test.go
+transport/internet/websocket/dialer_regression_test.go
