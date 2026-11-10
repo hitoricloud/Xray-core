@@ -35,8 +35,10 @@ func TestLocalHysteriaAuthentication(t *testing.T) {
 	roots := x509.NewCertPool()
 	roots.AddCert(parsed)
 	for _, auth := range []string{"TEST", "WRONG-TEST"} {
-		c := &client{lock: make(chan struct{}, 1), dest: xnet.UDPDestination(xnet.LocalHostIP, xnet.Port(listener.Addr().(*net.UDPAddr).Port)),
-			config: &Config{Auth: auth}, tlsConfig: &gotls.Config{RootCAs: roots, ServerName: "test.invalid", NextProtos: []string{"h3"}}}
+		c := &client{
+			lock: make(chan struct{}, 1), dest: xnet.UDPDestination(xnet.LocalHostIP, xnet.Port(listener.Addr().(*net.UDPAddr).Port)),
+			config: &Config{Auth: auth}, tlsConfig: &gotls.Config{RootCAs: roots, ServerName: "test.invalid", NextProtos: []string{"h3"}},
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		conn, err := c.tcp(ctx)
 		cancel()

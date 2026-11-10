@@ -24,8 +24,8 @@ import (
 	"github.com/xtls/xray-core/proxy/vless"
 	"github.com/xtls/xray-core/proxy/vless/encoding"
 	"github.com/xtls/xray-core/proxy/vless/inbound"
-	"github.com/xtls/xray-core/transport/internet"
 	tcpserver "github.com/xtls/xray-core/testing/servers/tcp"
+	"github.com/xtls/xray-core/transport/internet"
 	_ "github.com/xtls/xray-core/transport/internet/tcp"
 	_ "github.com/xtls/xray-core/transport/internet/udp"
 
@@ -315,4 +315,3 @@ func BenchmarkVlessConcurrent500(b *testing.B) {
 type discardHandler struct{}
 
 func (discardHandler) Handle(clog.Message) {}
-
