@@ -79,6 +79,7 @@ var (
 		"filter":        func() interface{} { return new(Filter) },
 		"header-custom": func() interface{} { return new(HeaderCustomTCP) },
 		"fragment":      func() interface{} { return new(FragmentMask) },
+		"hmc":           func() interface{} { return new(HMC) },
 		"sudoku":        func() interface{} { return new(Sudoku) },
 		"xmc":           func() interface{} { return new(XMC) },
 	}, "type", "settings")

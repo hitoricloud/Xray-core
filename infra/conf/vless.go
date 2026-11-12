@@ -387,3 +387,39 @@ func (c *VLessOutboundConfig) Build() (proto.Message, error) {
 
 	return config, nil
 }
+
+// vlessUserID returns the outbound's VLESS user id, or "" for other settings.
+func vlessUserID(settings proto.Message) string {
+	s, ok := settings.(*outbound.Config)
+	if !ok || s.Vnext == nil || s.Vnext.User == nil || s.Vnext.User.Account == nil {
+		return ""
+	}
+	message, err := s.Vnext.User.Account.GetInstance()
+	if err != nil {
+		return ""
+	}
+	if account, ok := message.(*vless.Account); ok {
+		return account.Id
+	}
+	return ""
+}
+
+// vlessEncrypts reports whether built VLESS settings enforce VLESS Encryption
+// (inbound decryption, or encryption on every outbound user).
+func vlessEncrypts(settings proto.Message) bool {
+	switch s := settings.(type) {
+	case *inbound.Config:
+		return s.Decryption != "" && s.Decryption != "none"
+	case *outbound.Config:
+		if s.Vnext == nil || s.Vnext.User == nil || s.Vnext.User.Account == nil {
+			return false
+		}
+		message, err := s.Vnext.User.Account.GetInstance()
+		if err != nil {
+			return false
+		}
+		account, ok := message.(*vless.Account)
+		return ok && account.Encryption != "" && account.Encryption != "none"
+	}
+	return false
+}
