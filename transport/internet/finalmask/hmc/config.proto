@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package xray.transport.internet.finalmask.hmc;
+option csharp_namespace = "Xray.Transport.Internet.Finalmask.HMC";
+option go_package = "github.com/xtls/xray-core/transport/internet/finalmask/hmc";
+option java_package = "com.xray.transport.internet.finalmask.hmc";
+option java_multiple_files = true;
+
+message Profile {
+    string username = 1;
+    bytes uuid = 2; // Exactly 16 bytes of the account's Mojang UUID.
+    reserved 3, 4;
+}
+
+message Config {
+    string password = 1;
+    reserved 2, 8;
+    // Random RSA-1024 public key shown in the login packet. Never used to encrypt.
+    bytes camouflage_public_key = 9;
+    string hostname = 10;
+    repeated Profile profiles = 11;
+    string dest = 12;
+    uint32 protocol_version = 13;
+    uint32 max_pre_auth = 14;
+    uint32 max_pre_auth_per_ip = 15;
+    uint32 max_relays_per_ip = 16;
+    uint32 rate_per_ip = 17;
+    uint32 burst_per_ip = 18;
+    repeated string trusted_sources = 19;
+}

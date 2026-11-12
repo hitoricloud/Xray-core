@@ -9,6 +9,7 @@ import (
 	"github.com/xtls/xray-core/common/errors"
 	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/transport/internet"
+	"github.com/xtls/xray-core/transport/internet/finalmask/hmc"
 	"github.com/xtls/xray-core/transport/internet/tls"
 )
 
@@ -68,6 +69,23 @@ type StreamConfig struct {
 	MASQUESettings      *MasqueConfig      `json:"masqueSettings"`
 	XDRIVESettings      *XDriveConfig      `json:"xdriveSettings"`
 	SocketSettings      *SocketConfig      `json:"sockopt"`
+
+	// Set by the handler builder: every VLESS user in the settings uses VLESS Encryption.
+	protocolEncrypted bool
+	// Set by the outbound builder: per-client seed (the VLESS user id) for HMC pseudo-accounts.
+	identitySeed string
+}
+
+func (c *StreamConfig) hasHMC() bool {
+	if c == nil || c.FinalMask == nil {
+		return false
+	}
+	for _, mask := range c.FinalMask.Tcp {
+		if strings.EqualFold(mask.Type, "hmc") {
+			return true
+		}
+	}
+	return false
 }
 
 // Build implements Buildable.
@@ -241,9 +259,15 @@ func (c *StreamConfig) Build() (*internet.StreamConfig, error) {
 
 	if c.FinalMask != nil {
 		for _, mask := range c.FinalMask.Tcp {
+			if strings.EqualFold(mask.Type, "hmc") && (config.ProtocolName != "tcp" || !(strings.EqualFold(c.Security, "tls") || c.protocolEncrypted && (c.Security == "" || strings.EqualFold(c.Security, "none")))) {
+				return nil, errors.New("hmc requires raw TCP with TLS or VLESS Encryption for authenticated encryption")
+			}
 			proto, err := mask.Build(true)
 			if err != nil {
 				return nil, errors.New("failed to build mask with type ", mask.Type).Base(err)
+			}
+			if built, ok := proto.(*hmc.Config); ok && len(built.Profiles) == 0 && c.identitySeed != "" {
+				built.Profiles = hmc.DerivedProfiles(built.Password, c.identitySeed)
 			}
 			config.Tcpmasks = append(config.Tcpmasks, serial.ToTypedMessage(proto))
 		}

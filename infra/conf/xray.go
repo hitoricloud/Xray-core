@@ -176,7 +176,24 @@ func (c *InboundDetourConfig) Build() (*core.InboundHandlerConfig, error) {
 		}
 	}
 
+	settings := []byte("{}")
+	if c.Settings != nil {
+		settings = ([]byte)(*c.Settings)
+	}
+	rawConfig, err := inboundConfigLoader.LoadWithID(settings, c.Protocol)
+	if err != nil {
+		return nil, errors.New("failed to load inbound detour config for protocol ", c.Protocol).Base(err)
+	}
+	if dokodemoConfig, ok := rawConfig.(*DokodemoConfig); ok {
+		receiverSettings.ReceiveOriginalDestination = dokodemoConfig.FollowRedirect
+	}
+	ts, err := rawConfig.(Buildable).Build()
+	if err != nil {
+		return nil, errors.New("failed to build inbound handler for protocol ", c.Protocol).Base(err)
+	}
+
 	if c.StreamSetting != nil {
+		c.StreamSetting.protocolEncrypted = vlessEncrypts(ts)
 		ss, err := c.StreamSetting.Build()
 		if err != nil {
 			return nil, err
@@ -195,21 +212,6 @@ func (c *InboundDetourConfig) Build() (*core.InboundHandlerConfig, error) {
 		receiverSettings.SniffingSettings = s
 	}
 
-	settings := []byte("{}")
-	if c.Settings != nil {
-		settings = ([]byte)(*c.Settings)
-	}
-	rawConfig, err := inboundConfigLoader.LoadWithID(settings, c.Protocol)
-	if err != nil {
-		return nil, errors.New("failed to load inbound detour config for protocol ", c.Protocol).Base(err)
-	}
-	if dokodemoConfig, ok := rawConfig.(*DokodemoConfig); ok {
-		receiverSettings.ReceiveOriginalDestination = dokodemoConfig.FollowRedirect
-	}
-	ts, err := rawConfig.(Buildable).Build()
-	if err != nil {
-		return nil, errors.New("failed to build inbound handler for protocol ", c.Protocol).Base(err)
-	}
 	if _, ok := ts.(*masque.ServerConfig); !ok && receiverSettings.StreamSettings != nil && receiverSettings.StreamSettings.ProtocolName == "masque" {
 		return nil, errors.New("the masque transport can only be used by the masque inbound")
 	}
@@ -368,7 +370,22 @@ func (c *OutboundDetourConfig) Build() (*core.OutboundHandlerConfig, error) {
 		senderSettings.Via = address.Build()
 	}
 
+	settings := []byte("{}")
+	if c.Settings != nil {
+		settings = ([]byte)(*c.Settings)
+	}
+	rawConfig, err := outboundConfigLoader.LoadWithID(settings, c.Protocol)
+	if err != nil {
+		return nil, errors.New("failed to load outbound detour config for protocol ", c.Protocol).Base(err)
+	}
+	ts, err := rawConfig.(Buildable).Build()
+	if err != nil {
+		return nil, errors.New("failed to build outbound handler for protocol ", c.Protocol).Base(err)
+	}
+
 	if c.StreamSetting != nil {
+		c.StreamSetting.protocolEncrypted = vlessEncrypts(ts)
+		c.StreamSetting.identitySeed = vlessUserID(ts)
 		ss, err := c.StreamSetting.Build()
 		if err != nil {
 			return nil, errors.New("failed to build stream settings for outbound detour").Base(err)
@@ -384,18 +401,6 @@ func (c *OutboundDetourConfig) Build() (*core.OutboundHandlerConfig, error) {
 		senderSettings.MultiplexSettings = ms
 	}
 
-	settings := []byte("{}")
-	if c.Settings != nil {
-		settings = ([]byte)(*c.Settings)
-	}
-	rawConfig, err := outboundConfigLoader.LoadWithID(settings, c.Protocol)
-	if err != nil {
-		return nil, errors.New("failed to load outbound detour config for protocol ", c.Protocol).Base(err)
-	}
-	ts, err := rawConfig.(Buildable).Build()
-	if err != nil {
-		return nil, errors.New("failed to build outbound handler for protocol ", c.Protocol).Base(err)
-	}
 	if err := validateXDrive(ts, senderSettings.StreamSettings, senderSettings.MultiplexSettings, nil); err != nil {
 		return nil, err
 	}
