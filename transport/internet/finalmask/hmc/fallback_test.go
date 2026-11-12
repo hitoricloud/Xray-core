@@ -186,7 +186,7 @@ func TestFallbackRelaysPreAuthByteForByte(t *testing.T) {
 				reply, _ = encodePacket(0, new(String(`{"description":"real fake server"}`)))
 			}
 			fake := newFakeDest(t, func(conn net.Conn, reader io.Reader) {
-				got := make([]byte, len(wire))
+				got := make([]byte, len(rewriteHandshake(wire, conn.LocalAddr().String())))
 				if _, err := io.ReadFull(reader, got); err == nil {
 					_ = writeFull(conn, reply)
 				}
@@ -203,8 +203,9 @@ func TestFallbackRelaysPreAuthByteForByte(t *testing.T) {
 			raw.Close()
 			<-done
 			records := fake.snapshots()
-			if len(records) != 1 || !bytes.Equal(records[0], wire) {
-				t.Fatalf("not an exact relay: %x != %x", records, wire)
+			want := rewriteHandshake(wire, fake.address())
+			if len(records) != 1 || !bytes.Equal(records[0], want) {
+				t.Fatalf("not an exact relay: %x != %x", records, want)
 			}
 		})
 	}
@@ -562,8 +563,9 @@ func TestKnockReplayAfterAcceptedConnection(t *testing.T) {
 		t.Fatalf("replayed knock must receive the dest's own Encryption Request: %v", err)
 	}
 	eventually(t, func() bool { return len(fake.snapshots()) == 3 })
-	if !bytes.Contains(fake.snapshots()[2], []byte(knock)) {
-		t.Fatal("dest did not receive the replayed handshake byte for byte")
+	want := rewriteHandshake(loginStartWire(t, knock, 2, testLoginProfile("test_user").UUID), fake.address())
+	if got := fake.snapshots()[2]; !bytes.Equal(got, want) || bytes.Contains(got, []byte(knock)) {
+		t.Fatal("dest did not receive the replayed login with its own address")
 	}
 	raw.Close()
 }

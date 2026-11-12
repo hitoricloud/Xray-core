@@ -58,8 +58,9 @@ func TestAdmissionCapturedKnockSlotsRelayExactly(t *testing.T) {
 	wire := loginStartWire(t, knock, 2, testLoginProfile("test_user").UUID)
 	reply := []byte("exact vanilla response")
 	fake := newFakeDest(t, func(conn net.Conn, r io.Reader) {
-		got := make([]byte, len(wire))
-		if _, err := io.ReadFull(r, got); err != nil || !bytes.Equal(got, wire) {
+		want := rewriteHandshake(wire, conn.LocalAddr().String())
+		got := make([]byte, len(want))
+		if _, err := io.ReadFull(r, got); err != nil || !bytes.Equal(got, want) || bytes.Contains(got, []byte(knock)) {
 			t.Error("over-cap knock relay changed recorded bytes", err)
 			return
 		}
@@ -90,7 +91,7 @@ func TestAdmissionCapturedKnockSlotsRelayExactly(t *testing.T) {
 		t.Fatal("third concurrent knock accepted")
 	}
 	snapshots := fake.snapshots()
-	if len(snapshots) != 1 || !bytes.Equal(snapshots[0], wire) {
+	if len(snapshots) != 1 || !bytes.Equal(snapshots[0], rewriteHandshake(wire, fake.address())) {
 		t.Fatal("valid but over-cap knock not relayed exactly once")
 	}
 	first.raw.Close()

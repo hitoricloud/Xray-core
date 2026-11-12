@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -78,6 +80,7 @@ func relayDest(client net.Conn, dest string, recorded []byte, limits relayLimits
 		}
 	}()
 	defer func() { close(stop); <-stopped }()
+	recorded = rewriteHandshake(recorded, dest)
 	if int64(len(recorded)) > limits.upload || writeFull(activityWriter{upstream, touch}, recorded) != nil {
 		return
 	}
@@ -91,6 +94,52 @@ func relayDest(client net.Conn, dest string, recorded []byte, limits relayLimits
 	}
 	// A clean EOF drains the other half within shared idle and total limits.
 	<-done
+}
+
+// rewriteHandshake points a recorded Handshake at dest, so virtual-host checks
+// on dest (TCPShield, DonutShield, ...) see their own address instead of ours.
+func rewriteHandshake(recorded []byte, dest string) []byte {
+	host, portText, err := net.SplitHostPort(dest)
+	if err != nil {
+		return recorded
+	}
+	portNumber, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil {
+		return recorded
+	}
+	length, prefix, err := parseVarint(recorded)
+	if err != nil || length < 1 || int(length) > len(recorded)-prefix {
+		return recorded
+	}
+	frameEnd := prefix + int(length)
+	packet, err := decodePacketBody(recorded[prefix:frameEnd])
+	if err != nil || packet.packetID != 0 {
+		return recorded
+	}
+	var (
+		version, state Varint
+		address        String
+		port           UnsignedShort
+	)
+	fields := bytes.NewReader(packet.data)
+	for _, f := range []field{&version, &address, &port, &state} {
+		if f.readFrom(fields) != nil {
+			return recorded
+		}
+	}
+	if fields.Len() != 0 {
+		return recorded
+	}
+	// Keep Forge markers ("\x00FML3\x00"); drop any other suffix, including HMC knocks.
+	if _, suffix, found := strings.Cut(string(address), "\x00"); found && (strings.HasPrefix(suffix, "FML") || strings.HasPrefix(suffix, "FORGE")) {
+		host += "\x00" + suffix
+	}
+	address, port = String(host), UnsignedShort(portNumber)
+	frame, err := encodePacket(0, &version, &address, &port, &state)
+	if err != nil {
+		return recorded
+	}
+	return append(frame, recorded[frameEnd:]...)
 }
 
 type activityWriter struct {

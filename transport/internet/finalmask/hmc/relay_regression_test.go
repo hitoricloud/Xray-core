@@ -119,3 +119,37 @@ func TestLegacyPingRelaysImmediately(t *testing.T) {
 	raw.Close()
 	<-done
 }
+
+func TestRewriteHandshakeTargetsDest(t *testing.T) {
+	handshake := func(address string, port UnsignedShort, state Varint) []byte {
+		frame, err := encodePacket(0, new(Varint(775)), new(String(address)), &port, &state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return frame
+	}
+	statusRequest, _ := encodePacket(0)
+	cases := []struct {
+		name, dest string
+		in, want   []byte
+	}{
+		{"status", "play.example.net:25566", append(handshake("92.246.138.51", 25565, 1), statusRequest...), append(handshake("play.example.net", 25566, 1), statusRequest...)},
+		{"login", "play.example.net:25565", handshake("gw.example", 25565, 2), handshake("play.example.net", 25565, 2)},
+		{"forge", "play.example.net:25565", handshake("92.246.138.51\x00FML3\x00", 25565, 2), handshake("play.example.net\x00FML3\x00", 25565, 2)},
+		{"forge-legacy", "play.example.net:25565", handshake("gw.example\x00FML\x00", 25565, 1), handshake("play.example.net\x00FML\x00", 25565, 1)},
+		{"knock-suffix", "play.example.net:25565", handshake("gw.example\x00pIPMSdOlu_0sKq9XimCqm-hJ", 25565, 2), handshake("play.example.net", 25565, 2)},
+		{"ipv6", "[2001:db8::1]:25565", handshake("gw.example", 25565, 1), handshake("2001:db8::1", 25565, 1)},
+		{"partial", "play.example.net:25565", handshake("gw.example", 25565, 1)[:6], handshake("gw.example", 25565, 1)[:6]},
+		{"garbage", "play.example.net:25565", []byte{0xff, 0xff, 0xff, 0xff, 0xff}, []byte{0xff, 0xff, 0xff, 0xff, 0xff}},
+		{"other-packet", "play.example.net:25565", []byte{1, 7}, []byte{1, 7}},
+		{"legacy-ping", "play.example.net:25565", []byte{0xfe, 0x01, 0xfa}, []byte{0xfe, 0x01, 0xfa}},
+		{"empty", "play.example.net:25565", nil, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := rewriteHandshake(c.in, c.dest); !bytes.Equal(got, c.want) {
+				t.Fatalf("got %x, want %x", got, c.want)
+			}
+		})
+	}
+}

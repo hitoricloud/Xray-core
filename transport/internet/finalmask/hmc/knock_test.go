@@ -196,7 +196,7 @@ func TestKnockSuffixParsingAndFallback(t *testing.T) {
 			}
 			wire := loginStartWire(t, address, 2, uuid)
 			fake := newFakeDest(t, func(conn net.Conn, reader io.Reader) {
-				got := make([]byte, len(wire))
+				got := make([]byte, len(rewriteHandshake(wire, conn.LocalAddr().String())))
 				if _, err := io.ReadFull(reader, got); err == nil {
 					_ = writeFull(conn, []byte("fallback"))
 				}
@@ -212,7 +212,9 @@ func TestKnockSuffixParsingAndFallback(t *testing.T) {
 				t.Fatalf("fallback=%q %v", got, err)
 			}
 			records := fake.snapshots()
-			if len(records) != 1 || !bytes.Equal(records[0], wire) || len(server.knocks.seen) != 0 {
+			want := loginStartWire(t, String(strings.Split(fake.address(), ":")[0]), 2, uuid)
+			want = rewriteHandshake(want, fake.address())
+			if len(records) != 1 || !bytes.Equal(records[0], want) || !bytes.Equal(rewriteHandshake(wire, fake.address()), want) || len(server.knocks.seen) != 0 {
 				t.Fatal("fallback changed bytes or consumed knock")
 			}
 		})
